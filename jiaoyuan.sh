@@ -194,8 +194,8 @@ start_backend() {
     cd "$SCRIPT_DIR"
     source .venv/bin/activate
 
-    # 使用后台进程启动
-    nohup python3 -m uvicorn api.main:app \
+    # 使用后台进程启动（修复：添加 PYTHONPATH=src 使模块可导入）
+    PYTHONPATH=src:$PYTHONPATH nohup python3 -m uvicorn api.main:app \
         --host 0.0.0.0 \
         --port "$API_PORT" \
         --log-level warning \
