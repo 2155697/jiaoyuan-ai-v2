@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
-import { Loader2, Bot } from 'lucide-react';
+import { Loader2, Bot, CheckCircle2, Brain, Eye, Lightbulb, MessageSquare, Sparkles } from 'lucide-react';
 import type { Message, ProgressState } from '../types';
 import { MessageBubble } from './MessageBubble';
 
@@ -44,22 +44,96 @@ function WelcomeScreen() {
   );
 }
 
-function ThinkingIndicator() {
+// 5步进度步骤配置
+const PROGRESS_STEPS = [
+  { key: 1, label: '感知分析', icon: Eye, desc: '分析用户意图和情绪状态' },
+  { key: 2, label: '理解问题', icon: Brain, desc: '匹配教员思维框架' },
+  { key: 3, label: '深度推理', icon: Lightbulb, desc: '矛盾分析 + 阶段判断' },
+  { key: 4, label: '生成回复', icon: Sparkles, desc: '教员风格表达中' },
+  { key: 5, label: '完成', icon: MessageSquare, desc: '回复已生成' },
+];
+
+function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
+  const currentStep = progress?.step || 0;
+  const currentLabel = progress?.label || '';
+  const currentDetail = progress?.detail || '';
+
   return (
     <div className="flex gap-3 message-appear">
       <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-soft">
         <Bot className="w-4 h-4 text-white" />
       </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-2">
           <span className="text-sm font-semibold text-primary">教员</span>
+          {currentStep > 0 && currentStep < 5 && (
+            <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent/10 text-accent animate-pulse">
+              {currentLabel}
+            </span>
+          )}
         </div>
-        <div className="bg-surface rounded-bubble-lg rounded-tl-sm px-4 py-3 shadow-soft border border-border inline-flex items-center gap-3">
-          <Loader2 className="w-4 h-4 text-primary animate-spin-slow" />
-          <div className="flex flex-col gap-1">
-            <span className="text-sm text-text">正在思考问题...</span>
-            <span className="text-[11px] text-text-muted">运用矛盾分析法进行推理</span>
+
+        {/* 5步进度条 */}
+        <div className="bg-surface rounded-xl px-4 py-3 shadow-soft border border-border max-w-xl">
+          {/* 步骤进度条 */}
+          <div className="flex items-center gap-1 mb-3">
+            {PROGRESS_STEPS.map((step, idx) => {
+              const isCompleted = currentStep > step.key;
+              const isCurrent = currentStep === step.key;
+              const StepIcon = step.icon;
+
+              return (
+                <div key={step.key} className="flex items-center flex-1">
+                  <div className="flex flex-col items-center flex-1">
+                    <div
+                      className={`w-7 h-7 rounded-full flex items-center justify-center transition-all duration-500 ${
+                        isCompleted
+                          ? 'bg-green-500 text-white'
+                          : isCurrent
+                          ? 'bg-primary text-white shadow-glow animate-pulse'
+                          : 'bg-border text-text-muted'
+                      }`}
+                    >
+                      {isCompleted ? (
+                        <CheckCircle2 className="w-4 h-4" />
+                      ) : isCurrent ? (
+                        <Loader2 className="w-4 h-4 animate-spin-slow" />
+                      ) : (
+                        <StepIcon className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span
+                      className={`text-[10px] mt-1 transition-colors duration-300 ${
+                        isCompleted || isCurrent ? 'text-primary font-medium' : 'text-text-muted'
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                  </div>
+                  {idx < PROGRESS_STEPS.length - 1 && (
+                    <div
+                      className={`h-0.5 flex-1 mx-1 rounded transition-colors duration-500 ${
+                        isCompleted ? 'bg-green-400' : 'bg-border'
+                      }`}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
+
+          {/* 当前步骤详情 */}
+          {currentStep > 0 && currentStep < 5 && currentDetail && (
+            <div className="thinking-section px-3 py-2 rounded-lg">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-accent status-pulse-green" />
+                <span className="text-xs text-text">{currentDetail}</span>
+              </div>
+            </div>
+          )}
+
+          {/* 思考片段流 */}
+          {/* thinkingChunks 在 MessageBubble 中显示 */}
         </div>
       </div>
     </div>
@@ -81,7 +155,7 @@ export function ChatContainer({ messages, isThinking, progress, thinkingChunks }
     if (shouldAutoScroll.current && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isThinking]);
+  }, [messages, isThinking, progress]);
 
   useEffect(() => {
     if (messagesEndRef.current) {
@@ -109,7 +183,7 @@ export function ChatContainer({ messages, isThinking, progress, thinkingChunks }
             thinkingChunks={index === messages.length - 1 && message.role === 'assistant' ? thinkingChunks : []}
           />
         ))}
-        {isThinking && messages[messages.length - 1]?.role === 'user' && <ThinkingIndicator />}
+        {isThinking && messages[messages.length - 1]?.role === 'user' && <ThinkingIndicator progress={progress} />}
         <div ref={messagesEndRef} className="h-4" />
       </div>
     </div>
