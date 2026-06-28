@@ -10,6 +10,10 @@
       Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background-color: #FDF6EC;
+    color: #2C1810;
+    margin: 0;
+    padding: 0;
   }
 
   /* 自定义滚动条 */
@@ -33,22 +37,155 @@
 }
 
 @layer components {
+  /* 消息出现动画 */
+  .message-appear {
+    animation: messageFadeIn 0.3s ease-out;
+  }
   .message-enter {
     animation: messageFadeIn 0.3s ease-out;
   }
 
+  /* 打字光标 */
   .typing-cursor::after {
     content: '|';
     animation: blink 1s infinite;
     color: #c0392b;
   }
 
+  /* 思考展开动画 */
   .thinking-expand {
     transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
   }
 
+  /* 思考区域样式 */
+  .thinking-section {
+    background: rgba(212, 165, 116, 0.1);
+    border-radius: 0.5rem;
+    border: 1px solid rgba(212, 165, 116, 0.3);
+  }
+
+  /* 引用区域样式 */
+  .quote-section {
+    background: rgba(212, 165, 116, 0.06);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* 苏格拉底提问卡片 */
+  .socratic-card {
+    background: rgba(250, 245, 239, 0.8);
+    border: 1px solid rgba(212, 165, 116, 0.2);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* Markdown 内容 */
+  .markdown-content {
+    line-height: 1.6;
+  }
+  .markdown-content p {
+    margin-bottom: 0.5rem;
+  }
+  .markdown-content strong {
+    color: #8B4513;
+  }
+  .markdown-content blockquote {
+    border-left: 2px solid #D4A574;
+    padding-left: 0.75rem;
+    margin: 0.5rem 0;
+    color: #8B7355;
+    font-style: italic;
+  }
+  .markdown-content ul {
+    padding-left: 1.25rem;
+    margin-bottom: 0.5rem;
+  }
+  .markdown-content li {
+    margin-bottom: 0.25rem;
+  }
+  .markdown-content h1,
+  .markdown-content h2,
+  .markdown-content h3 {
+    color: #8B4513;
+    margin-top: 0.75rem;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+  }
+
+  /* 会话列表项 */
+  .session-item {
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+  .session-item:hover {
+    background: rgba(139, 69, 19, 0.05);
+  }
+  .session-item.active {
+    background: rgba(139, 69, 19, 0.08);
+  }
+  .session-item.active > div:first-child {
+    border-left: 2px solid #8B4513;
+  }
+
+  /* 快捷提示按钮 */
+  .quick-prompt-btn {
+    transition: all 0.2s ease;
+    border: 1px solid rgba(212, 165, 116, 0.3);
+    cursor: pointer;
+  }
+  .quick-prompt-btn:hover {
+    background: rgba(139, 69, 19, 0.08);
+    border-color: rgba(139, 69, 19, 0.3);
+  }
+  .quick-prompt-btn:active {
+    transform: scale(0.98);
+  }
+
+  /* 聊天输入框 */
+  .chat-input {
+    border: 1px solid rgba(212, 165, 116, 0.4);
+    border-radius: 0.75rem;
+    transition: all 0.2s ease;
+  }
+  .chat-input:focus {
+    outline: none;
+    border-color: rgba(139, 69, 19, 0.5);
+    box-shadow: 0 0 0 2px rgba(139, 69, 19, 0.1);
+  }
+  .chat-input::placeholder {
+    color: rgba(139, 105, 85, 0.6);
+  }
+
+  /* 发送按钮 */
+  .send-button {
+    transition: all 0.2s ease;
+    border-radius: 0.75rem;
+  }
+  .send-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  .send-button:active:not(:disabled) {
+    transform: scale(0.95);
+  }
+
+  /* 脉冲圆点 */
   .pulse-dot {
     animation: pulse 2s infinite;
+  }
+
+  /* 状态脉冲 */
+  .status-pulse-green {
+    animation: statusPulse 2s infinite;
+  }
+  .status-pulse-red {
+    animation: statusPulseRed 2s infinite;
+  }
+
+  /* 暗色模式自动适配 */
+  .dark-auto {
+    background-color: #1a1410;
+    color: #e8ddd0;
   }
 }
 
@@ -73,10 +210,21 @@
   50% { opacity: 0.5; }
 }
 
-/* 暗色模式 */
-@media (prefers-color-scheme: dark) {
-  .dark-auto {
-    background-color: #1a1410;
-    color: #e8ddd0;
-  }
+@keyframes statusPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(34, 197, 94, 0); }
+}
+
+@keyframes statusPulseRed {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+
+/* 隐藏滚动条 */
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
