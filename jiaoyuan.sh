@@ -258,8 +258,8 @@ start_backend() {
 
     mkdir -p logs
 
-    # 关键：PYTHONPATH=src 使 api 模块可导入
-    export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
+    # 关键：PYTHONPATH=src 使 api 模块可导入（${PYTHONPATH:-} 处理未设置时默认为空）
+    export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH:-}"
     export OLLAMA_HOST="http://localhost:11434"
     export MODEL_NAME="$MODEL"
     export API_HOST="0.0.0.0"
@@ -392,7 +392,7 @@ echo -e "${GREEN}║    tail -f logs/backend.log  (后端日志)                
 echo -e "${GREEN}║    tail -f logs/frontend.log (前端日志)                      ║${NC}"
 echo -e "${GREEN}╠════════════════════════════════════════════════════════════════╣${NC}"
 echo -e "${GREEN}║  按 Ctrl+C 停止所有服务                                      ║${NC}"
-echo -e "${GREEN}║                                                              ║"
+echo -e "${GREEN}║                                                              ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 
 # 保持脚本运行
