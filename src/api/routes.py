@@ -1,25 +1,17 @@
-"""
-教员AI顾问 API - 路由模块
+"""教员AI顾问 API - 路由模块
 
 将所有API端点组织到独立的路由组：
 - chat_routes: 对话相关（普通对话、流式对话）
 - session_routes: 会话管理（获取历史、重置会话）
 - admin_routes: 管理接口（健康检查、系统统计、WebSocket统计）
 
-所有路由使用FastAPI的APIRouter，支持：
-- 自动API文档生成
-- 请求/响应模型验证
-- 依赖注入
-- 统一的错误处理
-
 作者: AI系统架构师
-版本: 3.0.0
+版本: 3.0.1
 """
 
 from __future__ import annotations
 
 import logging
-import time
 import os
 import sys
 from datetime import datetime
@@ -30,7 +22,6 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
-    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -49,7 +40,6 @@ from api.models import (
     APIErrorResponse,
     ChatRequest,
     ChatResponse,
-    ChatStreamRequest,
     DialogueTurnInfo,
     FeedbackRequest,
     HealthCheckResponse,
@@ -57,28 +47,20 @@ from api.models import (
     ReasoningDetail,
     ReasoningResultInfo,
     SessionInfo,
-    SessionListResponse,
     SessionResetResponse,
     SocraticQuestionInfo,
-    StreamChunk,
     SystemStatsResponse,
     UserIntentInfo,
     ProblemProfileInfo,
-    WebSocketMessage,
 )
 from api.dependencies import (
     EngineManager,
     get_engine,
-    get_request_id,
-    get_session_info,
 )
 from api.websocket_manager import websocket_manager
 
 logger = logging.getLogger("jiaoyuan.api.routes")
 
-# ============================================================================
-# 错误处理工具
-# ============================================================================
 
 def create_error_response(
     message: str,
@@ -86,18 +68,6 @@ def create_error_response(
     status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
     request_id: Optional[str] = None,
 ) -> JSONResponse:
-    """
-    创建统一的错误响应
-
-    Args:
-        message: 错误消息
-        code: 错误代码
-        status_code: HTTP状态码
-        request_id: 请求追踪ID
-
-    Returns:
-        JSONResponse错误响应
-    """
     return JSONResponse(
         status_code=status_code,
         content={
@@ -109,10 +79,6 @@ def create_error_response(
     )
 
 
-# ============================================================================
-# 对话路由
-# ============================================================================
-
 chat_routes = APIRouter(prefix="/chat", tags=["对话"])
 
 
@@ -121,27 +87,11 @@ chat_routes = APIRouter(prefix="/chat", tags=["对话"])
     response_model=ChatResponse,
     summary="普通对话",
     description="发送用户消息，获取AI的完整回复（含推理过程）。",
-    responses={
-        200: {"description": "成功", "model": ChatResponse},
-        422: {"description": "请求数据验证失败"},
-        500: {"description": "服务器内部错误", "model": APIErrorResponse},
-        503: {"description": "LLM服务不可用", "model": APIErrorResponse},
-    },
 )
 async def chat(
     request: ChatRequest,
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> ChatResponse:
-    """
-    普通对话接口
-
-    接收用户消息，通过五层认知架构处理后返回完整响应。
-    包含最终回复、推理过程和性能计时。
-
-    - **message**: 用户输入消息（1-10000字符）
-    - **session_id**: 会话ID（默认"default"）
-    - **user_id**: 用户ID（默认"anonymous"）
-    """
     try:
         result = await engine.chat(
             request.message,
@@ -149,7 +99,6 @@ async def chat(
             request.user_id,
         )
 
-        # 构造推理详情
         user_intent = UserIntentInfo(
             topic=result.get("user_intent", {}).get("topic", ""),
             emotion=result.get("user_intent", {}).get("emotion", ""),
@@ -205,29 +154,13 @@ async def chat_websocket(websocket: WebSocket) -> None:
     """
     WebSocket流式对话接口
 
-    通过WebSocket提供实时流式对话能力。
-
-    连接后，客户端发送JSON消息：
-    ```json
-    {"message": "你好", "session_id": "s1", "user_id": "u1"}
-    ```
-
-    服务器返回流式响应块：
-    - `{"type": "status", "content": "感知分析中..."}`
-    - `{"type": "thinking", "content": "推理过程..."}`
-    - `{"type": "content", "content": "回复片段..."}`
-    - `{"type": "done", "content": "", "processing_time_ms": 2500}`
-
-    错误时返回：
-    - `{"type": "error", "content": "错误描述", "code": "ERROR_CODE"}`
+    修复：不再在路由中重复 accept，由 websocket_manager.connect() 统一处理。
     """
-    # 首次连接时不接受（等待第一条消息获取session_id）
-    await websocket.accept()
-
     # 获取引擎
     try:
         engine = await EngineManager.get_engine()
     except Exception as e:
+        await websocket.accept()  # 必须先 accept 才能发送错误
         await websocket_manager.send_error(
             websocket,
             f"引擎未就绪: {str(e)}",
@@ -238,6 +171,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     # 等待第一条消息获取会话信息
     try:
+        await websocket.accept()  # 首次 accept
         data = await websocket.receive_json()
         session_id = data.get("session_id", "default")
         user_id = data.get("user_id", "anonymous")
@@ -258,11 +192,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
                     "消息不能为空",
                     error_code="EMPTY_MESSAGE",
                 )
-                # 等待下一条消息
                 data = await websocket.receive_json()
                 continue
 
-            # 处理流式对话
             await websocket_manager.handle_chat_stream(
                 websocket=websocket,
                 session_id=session_id,
@@ -271,7 +203,6 @@ async def chat_websocket(websocket: WebSocket) -> None:
                 engine=engine,
             )
 
-            # 等待下一条消息
             data = await websocket.receive_json()
 
     except WebSocketDisconnect:
@@ -287,34 +218,16 @@ async def chat_websocket(websocket: WebSocket) -> None:
         await websocket_manager.disconnect(websocket, session_id=session_id)
 
 
-@chat_routes.post(
-    "/feedback",
-    summary="提交反馈",
-    description="提交对AI回复的反馈，帮助改进系统。",
-    responses={
-        200: {"description": "反馈提交成功"},
-        422: {"description": "请求数据验证失败"},
-    },
-)
+@chat_routes.post("/feedback", summary="提交反馈")
 async def submit_feedback(
     request: FeedbackRequest,
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> Dict[str, Any]:
-    """
-    提交用户反馈
-
-    - **session_id**: 会话ID
-    - **turn_index**: 对话轮次索引（-1表示最后一轮）
-    - **rating**: 评分 1-5
-    - **comment**: 反馈文字（可选）
-    """
-    # TODO: 将反馈持久化到文件或数据库
     logger.info(
-        "Feedback received: session=%s, turn=%d, rating=%d, comment='%s'",
+        "Feedback received: session=%s, turn=%d, rating=%d",
         request.session_id,
         request.turn_index,
         request.rating,
-        request.comment[:50] if request.comment else "",
     )
 
     return {
@@ -325,38 +238,18 @@ async def submit_feedback(
     }
 
 
-# ============================================================================
-# 会话路由
-# ============================================================================
-
 session_routes = APIRouter(prefix="/sessions", tags=["会话管理"])
 
 
-@session_routes.get(
-    "/{session_id}",
-    response_model=SessionInfo,
-    summary="获取会话历史",
-    description="获取指定会话的对话历史和认知状态。",
-    responses={
-        200: {"description": "成功", "model": SessionInfo},
-        404: {"description": "会话不存在", "model": APIErrorResponse},
-    },
-)
+@session_routes.get("/{session_id}", response_model=SessionInfo, summary="获取会话历史")
 async def get_session(
     session_id: str,
     user_id: str = Query(default="anonymous", description="用户ID"),
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> SessionInfo:
-    """
-    获取会话历史
-
-    - **session_id**: 会话ID（路径参数）
-    - **user_id**: 用户ID（查询参数，默认"anonymous"）
-    """
     session_key = f"{user_id}:{session_id}"
 
     if session_key not in engine._sessions:
-        # 会话不存在，返回空会话
         return SessionInfo(
             session_id=session_id,
             user_id=user_id,
@@ -368,7 +261,6 @@ async def get_session(
     memory = engine._sessions[session_key]
     context = memory.get_context()
 
-    # 构建对话历史
     raw_history = context.get("history", [])
     history = [
         DialogueTurnInfo(
@@ -378,7 +270,6 @@ async def get_session(
         for h in raw_history
     ]
 
-    # 获取用户画像摘要
     user_profile = context.get("user_profile")
     profile_summary = {}
     if user_profile:
@@ -398,28 +289,12 @@ async def get_session(
     )
 
 
-@session_routes.delete(
-    "/{session_id}",
-    response_model=SessionResetResponse,
-    summary="重置会话",
-    description="清除指定会话的对话历史，重置认知状态。",
-    responses={
-        200: {"description": "会话已重置", "model": SessionResetResponse},
-    },
-)
+@session_routes.delete("/{session_id}", response_model=SessionResetResponse, summary="重置会话")
 async def reset_session(
     session_id: str,
     user_id: str = Query(default="anonymous", description="用户ID"),
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> SessionResetResponse:
-    """
-    重置会话
-
-    清除指定会话的所有对话历史、认知追踪器和记忆状态。
-
-    - **session_id**: 会话ID（路径参数）
-    - **user_id**: 用户ID（查询参数，默认"anonymous"）
-    """
     session_key = f"{user_id}:{session_id}"
 
     if session_key not in engine._sessions:
@@ -429,11 +304,9 @@ async def reset_session(
             previous_turns=0,
         )
 
-    # 获取重置前的信息
     memory = engine._sessions[session_key]
     previous_turns = len(memory.dialogue_memory.turns)
 
-    # 从引擎中删除会话（下次会自动创建新的）
     del engine._sessions[session_key]
 
     logger.info(
@@ -450,19 +323,10 @@ async def reset_session(
     )
 
 
-@session_routes.get(
-    "",
-    summary="列出会话",
-    description="列出所有活跃会话（开发调试用途）。",
-)
+@session_routes.get("", summary="列出会话")
 async def list_sessions(
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> Dict[str, Any]:
-    """
-    列出所有活跃会话
-
-    返回当前内存中的所有会话信息。
-    """
     sessions = []
     for key, memory in engine._sessions.items():
         parts = key.split(":", 1)
@@ -484,31 +348,13 @@ async def list_sessions(
     }
 
 
-# ============================================================================
-# 管理路由
-# ============================================================================
-
 admin_routes = APIRouter(prefix="", tags=["系统管理"])
 
 
-@admin_routes.get(
-    "/health",
-    response_model=HealthCheckResponse,
-    summary="健康检查",
-    description="检查API和各组件的健康状态。",
-)
+@admin_routes.get("/health", response_model=HealthCheckResponse, summary="健康检查")
 async def health_check(
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> HealthCheckResponse:
-    """
-    健康检查
-
-    返回API和各组件的健康状态：
-    - LLM服务（Ollama）
-    - 认知图谱
-    - 毛选检索器
-    - 活跃会话数
-    """
     try:
         engine_health = await engine.health_check()
 
@@ -519,7 +365,7 @@ async def health_check(
 
         return HealthCheckResponse(
             status=status,
-            version="3.0.0",
+            version="3.0.1",
             model=llm_status.get("model", "qwen3:8b"),
             timestamp=datetime.now().isoformat(),
             components={
@@ -534,7 +380,7 @@ async def health_check(
         logger.exception("Health check failed: %s", e)
         return HealthCheckResponse(
             status=HealthStatus.UNHEALTHY,
-            version="3.0.0",
+            version="3.0.1",
             model="unknown",
             timestamp=datetime.now().isoformat(),
             components={},
@@ -542,20 +388,10 @@ async def health_check(
         )
 
 
-@admin_routes.get(
-    "/stats",
-    response_model=SystemStatsResponse,
-    summary="系统统计",
-    description="获取引擎运行状态和统计数据。",
-)
+@admin_routes.get("/stats", response_model=SystemStatsResponse, summary="系统统计")
 async def get_stats(
     engine: JiaoyuanEngine = Depends(get_engine),
 ) -> SystemStatsResponse:
-    """
-    系统统计
-
-    返回引擎配置、会话统计、认知图谱和毛选库的统计信息。
-    """
     try:
         engine_stats = engine.get_stats()
 
@@ -578,17 +414,8 @@ async def get_stats(
         )
 
 
-@admin_routes.get(
-    "/ws-stats",
-    summary="WebSocket统计",
-    description="获取WebSocket连接统计信息（开发调试用途）。",
-)
+@admin_routes.get("/ws-stats", summary="WebSocket统计")
 async def get_websocket_stats() -> Dict[str, Any]:
-    """
-    WebSocket连接统计
-
-    返回当前WebSocket连接数、会话数和连接详情。
-    """
     stats = websocket_manager.get_stats()
     return {
         **stats,
@@ -596,19 +423,10 @@ async def get_websocket_stats() -> Dict[str, Any]:
     }
 
 
-@admin_routes.post(
-    "/cleanup",
-    summary="清理资源",
-    description="清理空闲连接和过期会话（管理用途）。",
-)
+@admin_routes.post("/cleanup", summary="清理资源")
 async def cleanup_resources(
     max_idle_seconds: float = Query(default=3600.0, ge=60.0, description="最大空闲时间(秒)"),
 ) -> Dict[str, Any]:
-    """
-    清理资源
-
-    - **max_idle_seconds**: 最大空闲时间（秒，默认3600）
-    """
     cleaned_connections = await websocket_manager.cleanup_idle_connections(max_idle_seconds)
 
     return {
