@@ -1,0 +1,4 @@
+flask==2.3.3
+chromadb==0.4.22
+requests==2.31.0
+sentence-transformers==2.2.2

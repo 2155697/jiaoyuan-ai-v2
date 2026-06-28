@@ -2,75 +2,60 @@
 set -e
 
 echo "========================================"
-echo "  教员AI顾问 - 一键部署"
+echo "  JiaoYuan AI - Setup"
 echo "========================================"
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-SRC_DIR="$PROJECT_DIR/src"
-KNOWLEDGE_DIR="$PROJECT_DIR/knowledge"
 
-# 0. 检查Python
-echo "[1/6] 检查 Python3..."
+# Check Python
+echo "[1/5] Checking Python3..."
 if ! command -v python3 &> /dev/null; then
-    echo "错误: 请先安装 Python3 (brew install python)"
+    echo "ERROR: Python3 not found. Install: brew install python"
     exit 1
 fi
-echo "  Python3 已安装"
+echo "  OK"
 
-# 1. 创建目录
-mkdir -p "$SRC_DIR" "$KNOWLEDGE_DIR"
-echo "  目录结构就绪"
-
-# 2. 创建虚拟环境
-echo "[2/6] 创建虚拟环境..."
+# Create venv
+echo "[2/5] Creating virtual environment..."
 if [ ! -d "$PROJECT_DIR/.venv" ]; then
     python3 -m venv "$PROJECT_DIR/.venv"
 fi
 source "$PROJECT_DIR/.venv/bin/activate"
-echo "  虚拟环境已激活"
+echo "  OK"
 
-# 3. 安装依赖
-echo "[3/6] 安装 Python 依赖..."
-pip install -q PyMuPDF chromadb sentence-transformers gradio
-echo "  依赖安装完成"
+# Install deps
+echo "[3/5] Installing dependencies..."
+pip install -q -r "$PROJECT_DIR/requirements.txt"
+echo "  OK"
 
-# 4. 检查Ollama
-echo "[4/6] 检查 Ollama..."
+# Check Ollama
+echo "[4/5] Checking Ollama..."
 if ! command -v ollama &> /dev/null; then
-    echo "  Ollama 未安装, 请手动安装: brew install --cask ollama"
-    echo "  安装后运行: ollama serve"
+    echo "ERROR: Ollama not found. Install: brew install --cask ollama"
     exit 1
 fi
 if ! pgrep -x "ollama" > /dev/null; then
-    echo "  启动 Ollama 服务..."
+    echo "  Starting Ollama..."
     ollama serve &
     sleep 3
 fi
-echo "  Ollama 就绪"
+echo "  OK"
 
-# 5. 下载模型
-echo "[5/6] 下载 AI 模型(约4GB, 需要一些时间)..."
+# Download model
+echo "[5/5] Downloading AI model..."
 if ollama list | grep -q "qwen2.5:7b"; then
-    echo "  模型已存在"
+    echo "  Model exists"
 else
     ollama pull qwen2.5:7b
-    echo "  模型下载完成"
+    echo "  Downloaded"
 fi
 
-# 6. 构建知识库
-echo "[6/6] 构建知识库..."
-cd "$PROJECT_DIR"
-python3 "$SRC_DIR/extract_pdf.py"
-python3 "$SRC_DIR/build_knowledge.py"
-
 echo ""
 echo "========================================"
-echo "  部署完成!"
+echo "  Setup Complete!"
 echo "========================================"
 echo ""
-echo "启动方式:"
-echo "  cd $PROJECT_DIR"
+echo "Next steps:"
+echo "  python3 src/build_knowledge.py"
 echo "  ./start.sh"
-echo ""
-echo "浏览器打开: http://localhost:7860"
 echo ""
