@@ -113,7 +113,9 @@ class JiaoyuanEngine:
             pa = reasoning_result.phase_assessment
             phase_text = f"当前阶段：{pa.current_phase.value}"
 
-        # 修复：使用 "\n" 替代 chr(10)
+        # 修复：Python 3.9 不支持 f-string 内的反斜杠转义，先提取为变量
+        key_insights_str = "\n".join([f"- {insight}" for insight in reasoning_result.key_insights[:5]])
+
         context = f"""用户情绪：{user_intent.emotion.value}
 问题主题：{user_intent.topic}
 认知阶段：{user_intent.cognitive_stage.value}
@@ -122,7 +124,7 @@ class JiaoyuanEngine:
 适用框架：{reasoning_result.framework.value}
 
 关键洞察：
-{"\n".join([f"- {insight}" for insight in reasoning_result.key_insights[:5]])}
+{key_insights_str}
 
 苏格拉底提问（层层递进引导思考）：
 {questions_text}
