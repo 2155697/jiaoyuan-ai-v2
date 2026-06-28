@@ -23,6 +23,8 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from fastapi import Depends
+
 # 将core目录加入路径（支持从api目录和项目根目录运行）
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _core_dir = os.path.join(_current_dir, "..", "core")
