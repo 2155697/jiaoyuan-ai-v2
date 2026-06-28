@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>教员AI顾问</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #FDF6EC; }
+h1 { color: #8B4513; text-align: center; }
+#chat { height: 400px; overflow-y: auto; border: 1px solid #D4A574; border-radius: 8px; padding: 10px; background: white; margin-bottom: 10px; }
+.msg { margin: 8px 0; padding: 8px 12px; border-radius: 8px; }
+.user { background: #667eea; color: white; margin-left: 20%; }
+.assistant { background: #f0f0f0; color: #333; margin-right: 20%; }
+#inputArea { display: flex; gap: 8px; }
+input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 20px; font-size: 16px; }
+button { padding: 12px 24px; background: #C0392B; color: white; border: none; border-radius: 20px; cursor: pointer; }
+button:disabled { opacity: 0.5; }
+.thinking { color: #999; font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<h1>教员AI顾问 v3.0</h1>
+<div id="chat"></div>
+<div id="inputArea">
+<input id="msg" placeholder="输入你的问题..." onkeypress="if(event.key==='Enter')send()">
+<button id="btn" onclick="send()">发送</button>
+</div>
+
+<script>
+const API = 'http://localhost:8000';
+
+function add(text, who, thinking) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + who;
+  d.textContent = text;
+  document.getElementById('chat').appendChild(d);
+  if (thinking) {
+    const t = document.createElement('div');
+    t.className = 'thinking';
+    t.textContent = '思考: ' + thinking.substring(0, 200) + '...';
+    document.getElementById('chat').appendChild(t);
+  }
+  document.getElementById('chat').scrollTop = 99999;
+}
+
+async function send() {
+  const input = document.getElementById('msg');
+  const btn = document.getElementById('btn');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+  add(text, 'user');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(API + '/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text, session_id: 's1', user_id: 'u1'})
+    });
+    const data = await res.json();
+    const reply = data.response || '无回复';
+    const thinking = data.reasoning?.thinking_content || '';
+    add(reply, 'assistant', thinking);
+  } catch (e) {
+    add('请求失败: ' + e.message + '\n请确认后端在 http://localhost:8000 运行', 'assistant');
+  }
+  btn.disabled = false;
+}
+
+add('你好，我是教员AI顾问。用教员的思维方式帮你分析问题。请问遇到什么问题了？', 'assistant');
+</script>
+</body>
+</html>
