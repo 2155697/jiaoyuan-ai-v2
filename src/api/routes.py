@@ -6,7 +6,7 @@
 - admin_routes: 管理接口（健康检查、系统统计、WebSocket统计）
 
 作者: AI系统架构师
-版本: 3.0.1
+版本: 3.0.2
 """
 
 from __future__ import annotations
@@ -361,11 +361,12 @@ async def health_check(
         llm_status = engine_health.get("llm", {})
         llm_healthy = llm_status.get("healthy", False)
 
-        status = HealthStatus.HEALTHY if llm_healthy else HealthStatus.DEGRADED
+        # 修复：避免覆盖 fastapi.status 导入
+        health_status = HealthStatus.HEALTHY if llm_healthy else HealthStatus.DEGRADED
 
         return HealthCheckResponse(
-            status=status,
-            version="3.0.1",
+            status=health_status,
+            version="3.0.2",
             model=llm_status.get("model", "qwen3:8b"),
             timestamp=datetime.now().isoformat(),
             components={
@@ -380,7 +381,7 @@ async def health_check(
         logger.exception("Health check failed: %s", e)
         return HealthCheckResponse(
             status=HealthStatus.UNHEALTHY,
-            version="3.0.1",
+            version="3.0.2",
             model="unknown",
             timestamp=datetime.now().isoformat(),
             components={},
