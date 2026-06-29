@@ -64,14 +64,14 @@ kill_existing() {
 }
 
 # ========================================================================
-# 检查 Python 版本（必须 3.12+，因为 f-string 转义问题）
+# 检查 Python 版本（3.9+ 即可，f-string 兼容已修复）
 # ========================================================================
 check_python() {
     log_step "检查 Python 环境"
     
     if ! command_exists python3; then
         log_error "未找到 python3"
-        log_error "macOS 安装: brew install python@3.12"
+        log_error "macOS 安装: brew install python@3.9"
         exit 1
     fi
 
@@ -81,15 +81,13 @@ check_python() {
     
     log_info "Python 版本: $PYTHON_VERSION"
     
-    if [ "$MAJOR" -lt 3 ] || [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 12 ]; then
-        log_error "❌ 需要 Python 3.12+"
-        log_error "代码中使用了 f-string \\n 转义，Python 3.11 及以下会报 SyntaxError"
-        log_error "请安装: brew install python@3.12"
-        log_error "然后设置: export PATH=\"/opt/homebrew/opt/python@3.12/libexec/bin:\$PATH\""
+    if [ "$MAJOR" -lt 3 ] || [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 9 ]; then
+        log_error "❌ 需要 Python 3.9+"
+        log_error "请安装: brew install python@3.9"
         exit 1
     fi
     
-    log_info "Python 3.12+ 检查通过 ✓"
+    log_info "Python 3.9+ 检查通过 ✓"
 }
 
 # ========================================================================
