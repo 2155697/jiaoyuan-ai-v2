@@ -1,5 +1,4 @@
-"""
-教员AI顾问 API - FastAPI主应用
+"""教员AI顾问 API - FastAPI主应用
 
 五层认知架构的教员AI顾问Web后端入口。
 
@@ -44,6 +43,17 @@ _current_dir = os.path.dirname(os.path.abspath(__file__))
 _project_dir = os.path.join(_current_dir, "..")
 if _project_dir not in sys.path:
     sys.path.insert(0, _project_dir)
+
+# ============================================================================
+# 加载环境变量（确保 .env 配置生效）
+# ============================================================================
+
+try:
+    from dotenv import load_dotenv
+    _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    load_dotenv(_env_path)
+except ImportError:
+    pass  # python-dotenv 未安装，依赖系统环境变量
 
 # ============================================================================
 # FastAPI导入
