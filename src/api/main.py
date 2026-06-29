@@ -367,7 +367,7 @@ async def root() -> Dict[str, Any]:
         "name": "教员AI顾问 API",
         "version": "3.0.0",
         "description": "五层认知架构的教员AI顾问",
-        "model": "qwen3:8b",
+        "model": os.environ.get("MODEL_NAME", "qwen3:8b"),
         "docs": "/docs",
         "redoc": "/redoc",
         "health": "/api/health",
