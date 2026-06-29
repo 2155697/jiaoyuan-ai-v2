@@ -534,7 +534,7 @@ class EngineConfig(BaseModel):
     max_context_tokens: int = Field(default=8192)
 
     # 超时配置
-    llm_timeout_seconds: int = Field(default=30)
+    llm_timeout_seconds: int = Field(default=120)
     max_total_response_time: int = Field(default=10)
 
     # 认知图谱配置
