@@ -128,18 +128,17 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
     };
   }, [currentStep, backendPercent]);
 
-  // 百分比变化时触发动画
+  // 显示用的百分比：优先使用模拟进度，但如果后端给更高值则使用后端值
+  const displayPercent = backendPercent >= 100 ? 100 : Math.max(simulatedPercent, backendPercent);
+  const isComplete = displayPercent >= 100;
+
+  // 百分比变化时触发动画（必须在 displayPercent 声明之后）
   const roundedPercent = Math.round(displayPercent);
   useEffect(() => {
     setPercentPop(true);
     const timer = setTimeout(() => setPercentPop(false), 200);
     return () => clearTimeout(timer);
   }, [roundedPercent]);
-
-  // 显示用的百分比：优先使用模拟进度，但如果后端给更高值则使用后端值
-  const displayPercent = backendPercent >= 100 ? 100 : Math.max(simulatedPercent, backendPercent);
-
-  const isComplete = displayPercent >= 100;
 
   return (
     <div className="flex gap-3 message-appear">
