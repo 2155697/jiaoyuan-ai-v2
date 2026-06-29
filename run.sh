@@ -202,6 +202,7 @@ start_frontend() {
         > "${FRONTEND_LOG}" 2>&1 &
 
     local frontend_pid=$!
+    echo "${frontend_pid}" > "${LOG_DIR}/frontend.pid"
     log "前端进程 PID: ${frontend_pid}，日志: ${FRONTEND_LOG}"
 
     # 等待前端就绪
@@ -271,6 +272,16 @@ print_status() {
         fi
     fi
 
+    if [[ -f "${LOG_DIR}/frontend.pid" ]]; then
+        local pid
+        pid=$(cat "${LOG_DIR}/frontend.pid")
+        if kill -0 "${pid}" 2>/dev/null; then
+            frontend_pid="${pid} ${GREEN}(运行中)${NC}"
+        else
+            frontend_pid="${pid} ${RED}(已退出)${NC}"
+        fi
+    fi
+
     echo -e "  ${CYAN}后端:${NC}  http://localhost:8000    PID: ${backend_pid}"
     echo -e "  ${CYAN}前端:${NC}  http://localhost:5173    PID: ${frontend_pid}"
     echo -e "  ${CYAN}日志:${NC}  ${LOG_DIR}/"
@@ -293,14 +304,14 @@ trap 'echo ""; warn "脚本中断"; exit 130' SIGINT SIGTERM
 # ---------------------------------------------------------------------------
 clear
 echo -e "${BOLD}"
-echo "    ████████╗██╗  ██╗ ██████╗ ███████╗"
-echo "    ╚══██╔══╝██║  ██║██╔═══██╗██╔════╝"
-echo "       ██║   ███████║██║   ██║███████╗"
-echo "       ██║   ██╔══██║██║   ██║╚════██║"
-echo "       ██║   ██║  ██║╚██████╔╝███████║"
-echo "       ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝"
+echo "    ██╗ █████╗  ██████╗  ██████╗ ██╗   ██╗ █████╗ ███╗   ██╗"
+echo "    ██║██╔══██╗██╔═══██╗██╔═══██╗██║   ██║██╔══██╗████╗  ██║"
+echo "    ██║███████║██║   ██║██║   ██║██║   ██║███████║██╔██╗ ██║"
+echo "    ██║██╔══██║██║   ██║██║   ██║╚██╗ ██╔╝██╔══██║██║╚██╗██║"
+echo "    ██║██║  ██║╚██████╔╝╚██████╔╝ ╚████╔╝ ██║  ██║██║ ╚████║"
+echo "    ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚═════╝   ╚═══╝  ╚═╝  ╚═╝╚═╝  ╚═══╝"
 echo -e "${NC}"
-echo -e "  ${BOLD}校园AI助手 - 一键启动脚本${NC}"
+echo -e "  ${BOLD}教员AI顾问 - 一键启动脚本${NC}"
 echo -e "  ========================================="
 echo -e ""
 
