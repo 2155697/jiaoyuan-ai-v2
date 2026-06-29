@@ -41,20 +41,20 @@ check_port() {
 }
 
 # ---------------------------------------------------------------------------
-# 检测 uvicorn —— 输出到 stdout 的只有命令路径，其他全部走 stderr
+# 检测 uvicorn —— 输出到 stdout 的只有命令路径，日志走 stderr
 detect_uvicorn() {
     # 1. PATH 中的 uvicorn
     local uvicorn_path
     uvicorn_path=$(command -v uvicorn 2>/dev/null)
     if [[ -n "${uvicorn_path}" ]]; then
-        echo "uvicorn"  # 只有这一行走 stdout
+        echo "uvicorn"
         return 0
     fi
 
     # 2. python3 -m uvicorn
     if command -v python3 &>/dev/null; then
         if python3 -m uvicorn --version &>/dev/null 2>&1; then
-            echo "python3 -m uvicorn"  # stdout
+            echo "python3 -m uvicorn"
             return 0
         fi
     fi
@@ -62,25 +62,29 @@ detect_uvicorn() {
     # 3. python -m uvicorn
     if command -v python &>/dev/null; then
         if python -m uvicorn --version &>/dev/null 2>&1; then
-            echo "python -m uvicorn"  # stdout
+            echo "python -m uvicorn"
             return 0
         fi
     fi
 
-    # 4. 虚拟环境
-    if [[ -x "${PROJECT_DIR}/.venv/bin/uvicorn" ]]; then
-        echo "${PROJECT_DIR}/.venv/bin/uvicorn"  # stdout
-        return 0
+    # 4. 虚拟环境 —— 用 python3 -m uvicorn 更可靠（避免依赖查找问题）
+    if [[ -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
+        if "${PROJECT_DIR}/.venv/bin/python3" -m uvicorn --version &>/dev/null 2>&1; then
+            echo "${PROJECT_DIR}/.venv/bin/python3 -m uvicorn"
+            return 0
+        fi
     fi
-    if [[ -x "${PROJECT_DIR}/venv/bin/uvicorn" ]]; then
-        echo "${PROJECT_DIR}/venv/bin/uvicorn"  # stdout
-        return 0
+    if [[ -x "${PROJECT_DIR}/venv/bin/python3" ]]; then
+        if "${PROJECT_DIR}/venv/bin/python3" -m uvicorn --version &>/dev/null 2>&1; then
+            echo "${PROJECT_DIR}/venv/bin/python3 -m uvicorn"
+            return 0
+        fi
     fi
 
-    # 全部失败 —— 错误信息走 stderr
+    # 全部失败
     err "未找到 uvicorn"
     echo "" >&2
-    echo -e "  ${YELLOW}请手动安装:${NC}" >&2
+    echo -e "  ${YELLOW}请安装:${NC}" >&2
     echo -e "    python3 -m pip install uvicorn[standard]" >&2
     echo -e "  或激活虚拟环境:" >&2
     echo -e "    source .venv/bin/activate && pip install uvicorn[standard]" >&2
@@ -93,7 +97,6 @@ start_backend() {
     step "启动后端"
     check_port 8000 "FastAPI"
 
-    # detect_uvicorn 只返回命令到 stdout，日志全部走 stderr
     local uvicorn_cmd
     uvicorn_cmd=$(detect_uvicorn) || exit 1
     ok "uvicorn: ${uvicorn_cmd}"
