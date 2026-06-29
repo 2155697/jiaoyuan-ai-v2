@@ -272,6 +272,16 @@ class MaoxuanRetriever:
             db_path, embedding_model,
         )
 
+        # 自动构建索引（如果数据库为空）
+        try:
+            self._ensure_dependencies()
+            collection = self._get_collection()
+            if collection.count() == 0:
+                logger.info("Maoxuan database empty, auto-building index...")
+                self.build_index()
+        except Exception as e:
+            logger.warning("Auto-build index failed (dependencies may not be installed): %s", e)
+
     def _ensure_dependencies(self) -> None:
         """确保依赖已导入"""
         if self._chromadb is None:
