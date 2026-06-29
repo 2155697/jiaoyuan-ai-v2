@@ -14,7 +14,7 @@ log()  { echo -e "${BLUE}[INFO]${NC}  $1"; }
 ok()   { echo -e "${GREEN}[OK]${NC}   $1"; }
 err()  { echo -e "${RED}[ERR]${NC}  $1" >&2; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-step() { echo -e ""; echo -e "${BOLD}${MAGENTA}==>${NC} ${BOLD}$1${NC}"; }
+step() { echo ""; echo -e "${BOLD}${MAGENTA}==>${NC} ${BOLD}$1${NC}"; }
 
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,9 +25,7 @@ BACKEND_LOG="${LOG_DIR}/backend.log"
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 BACKEND_PID_FILE="${LOG_DIR}/backend.pid"
 
-step "项目目录"
-log "${PROJECT_DIR}"
-ok "验证通过"
+step "项目目录: ${PROJECT_DIR}"
 
 > "${BACKEND_LOG}"; > "${FRONTEND_LOG}"
 
@@ -43,56 +41,50 @@ check_port() {
 }
 
 # ---------------------------------------------------------------------------
-# 检测 uvicorn：尝试多种方式，哪个能用用哪个
+# 检测 uvicorn —— 输出到 stdout 的只有命令路径，其他全部走 stderr
 detect_uvicorn() {
-    local uvicorn_cmd=""
-
-    # 方式1: PATH 中的 uvicorn 命令（你之前可能用的就是这个）
-    if command -v uvicorn &>/dev/null; then
-        uvicorn_cmd="uvicorn"
-        ok "uvicorn: $(uvicorn --version 2>&1)"
-        echo "${uvicorn_cmd}"
+    # 1. PATH 中的 uvicorn
+    local uvicorn_path
+    uvicorn_path=$(command -v uvicorn 2>/dev/null)
+    if [[ -n "${uvicorn_path}" ]]; then
+        echo "uvicorn"  # 只有这一行走 stdout
         return 0
     fi
 
-    # 方式2: python3 -m uvicorn
-    if command -v python3 &>/dev/null && python3 -m uvicorn --version &>/dev/null 2>&1; then
-        uvicorn_cmd="python3 -m uvicorn"
-        ok "uvicorn: $(python3 -m uvicorn --version 2>&1)"
-        echo "${uvicorn_cmd}"
-        return 0
-    fi
-
-    # 方式3: python -m uvicorn
-    if command -v python &>/dev/null && python -m uvicorn --version &>/dev/null 2>&1; then
-        uvicorn_cmd="python -m uvicorn"
-        ok "uvicorn: $(python -m uvicorn --version 2>&1)"
-        echo "${uvicorn_cmd}"
-        return 0
-    fi
-
-    # 方式4: 虚拟环境
-    local venv_paths=("${PROJECT_DIR}/venv/bin/uvicorn" "${PROJECT_DIR}/.venv/bin/uvicorn")
-    for v in "${venv_paths[@]}"; do
-        if [[ -x "$v" ]]; then
-            ok "uvicorn: ${v}"
-            echo "${v}"
+    # 2. python3 -m uvicorn
+    if command -v python3 &>/dev/null; then
+        if python3 -m uvicorn --version &>/dev/null 2>&1; then
+            echo "python3 -m uvicorn"  # stdout
             return 0
         fi
-    done
+    fi
 
-    # 全部失败
+    # 3. python -m uvicorn
+    if command -v python &>/dev/null; then
+        if python -m uvicorn --version &>/dev/null 2>&1; then
+            echo "python -m uvicorn"  # stdout
+            return 0
+        fi
+    fi
+
+    # 4. 虚拟环境
+    if [[ -x "${PROJECT_DIR}/.venv/bin/uvicorn" ]]; then
+        echo "${PROJECT_DIR}/.venv/bin/uvicorn"  # stdout
+        return 0
+    fi
+    if [[ -x "${PROJECT_DIR}/venv/bin/uvicorn" ]]; then
+        echo "${PROJECT_DIR}/venv/bin/uvicorn"  # stdout
+        return 0
+    fi
+
+    # 全部失败 —— 错误信息走 stderr
     err "未找到 uvicorn"
-    echo ""
-    echo -e "  ${YELLOW}请手动安装:${NC}"
-    echo -e "    python3 -m pip install uvicorn[standard]"
-    echo -e "  或:"
-    echo -e "    pip3 install uvicorn[standard]"
-    echo ""
-    echo -e "  如果你用了虚拟环境:"
-    echo -e "    source venv/bin/activate"
-    echo -e "    pip install uvicorn[standard]"
-    echo ""
+    echo "" >&2
+    echo -e "  ${YELLOW}请手动安装:${NC}" >&2
+    echo -e "    python3 -m pip install uvicorn[standard]" >&2
+    echo -e "  或激活虚拟环境:" >&2
+    echo -e "    source .venv/bin/activate && pip install uvicorn[standard]" >&2
+    echo "" >&2
     return 1
 }
 
@@ -101,10 +93,12 @@ start_backend() {
     step "启动后端"
     check_port 8000 "FastAPI"
 
+    # detect_uvicorn 只返回命令到 stdout，日志全部走 stderr
     local uvicorn_cmd
     uvicorn_cmd=$(detect_uvicorn) || exit 1
+    ok "uvicorn: ${uvicorn_cmd}"
 
-    log "nohup ${uvicorn_cmd} api.main:app"
+    log "启动: nohup ${uvicorn_cmd} api.main:app"
     cd "${PROJECT_DIR}/src"
     nohup ${uvicorn_cmd} api.main:app --host 0.0.0.0 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
 
@@ -112,14 +106,14 @@ start_backend() {
     echo "${pid}" > "${BACKEND_PID_FILE}"
 
     local retries=0 max=30
-    log "等待后端就绪..."
+    log "等待后端就绪 (最多 ${max} 秒)..."
     while [[ ${retries} -lt ${max} ]]; do
         if curl -sf "http://localhost:8000/api/health" >/dev/null 2>&1; then
             ok "后端就绪"
             return 0
         fi
         if ! kill -0 "${pid}" 2>/dev/null; then
-            err "后端进程退出"
+            err "后端进程已退出"
             tail -n 30 "${BACKEND_LOG}" >&2
             exit 1
         fi
@@ -143,6 +137,7 @@ start_frontend() {
         ok "node_modules 已存在"
     fi
 
+    log "启动: npm run dev"
     nohup npm run dev > "${FRONTEND_LOG}" 2>&1 &
     local pid=$!
     echo "${pid}" > "${LOG_DIR}/frontend.pid"
@@ -165,7 +160,7 @@ start_frontend() {
 open_browser() {
     step "打开浏览器"
     if command -v open &>/dev/null; then
-        sleep 1; open "http://localhost:5173"; ok "已打开"
+        sleep 1; open "http://localhost:5173"; ok "浏览器已打开"
     fi
 }
 
@@ -187,8 +182,8 @@ print_status() {
     echo -e "  ${GREEN}🚀 启动完成！${NC}"
     echo ""
     echo -e "  ${YELLOW}提示:${NC}"
-    echo -e "    日志:    tail -f ${BACKEND_LOG}"
-    echo -e "    停止:    bash stop.sh"
+    echo -e "    日志: tail -f ${BACKEND_LOG}"
+    echo -e "    停止: bash stop.sh"
 }
 
 # ---------------------------------------------------------------------------
