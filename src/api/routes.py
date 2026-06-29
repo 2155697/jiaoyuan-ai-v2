@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -156,11 +157,16 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     修复：不再在路由中重复 accept，由 websocket_manager.connect() 统一处理。
     """
-    # 获取引擎
+    # 先 accept 连接，避免浏览器超时等待
+    try:
+        await websocket.accept()
+    except Exception:
+        return
+
+    # 获取引擎（在 accept 之后，避免超时）
     try:
         engine = await EngineManager.get_engine()
     except Exception as e:
-        await websocket.accept()  # 必须先 accept 才能发送错误
         await websocket_manager.send_error(
             websocket,
             f"引擎未就绪: {str(e)}",
@@ -171,7 +177,6 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     # 等待第一条消息获取会话信息
     try:
-        await websocket.accept()  # 首次 accept
         data = await websocket.receive_json()
         session_id = data.get("session_id", "default")
         user_id = data.get("user_id", "anonymous")
@@ -184,7 +189,15 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     try:
         while True:
-            message = data.get("message", "").strip()
+            # 处理前端心跳 ping
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+                data = await websocket.receive_json()
+                continue
+
+            # 更健壮地获取 message 字段（处理 null 或非字符串值）
+            raw_message = data.get("message")
+            message = (raw_message or "").strip() if isinstance(raw_message, str) else ""
 
             if not message:
                 await websocket_manager.send_error(
@@ -207,6 +220,8 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         logger.debug("WebSocket disconnected: session=%s", session_id)
+    except asyncio.CancelledError:
+        logger.debug("WebSocket cancelled: session=%s", session_id)
     except Exception as e:
         logger.exception("WebSocket error: %s", e)
         await websocket_manager.send_error(

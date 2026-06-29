@@ -1,9 +1,10 @@
-"""
-教员AI顾问 - Ollama异步LLM客户端
+"""教员AI顾问 - Ollama异步LLM客户端
 
 基于aiohttp的异步Ollama API客户端，支持：
 - 异步HTTP调用（连接池复用）
-- Qwen3 Thinking模式（<think>标签解析）
+- Qwen3 Thinking模式（
+  
+  标签解析）
 - SSE流式输出
 - 自动重试（3次，指数退避）
 - 完整的错误处理和日志记录
@@ -32,13 +33,15 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "qwen3:8b"
-DEFAULT_TIMEOUT = 60  # 秒
+DEFAULT_TIMEOUT = 120  # 秒（增加到120秒，避免模型加载超时）
 MAX_RETRIES = 3
 RETRY_BASE_DELAY = 1.0  # 基础退避时间（秒）
 
 # Thinking标签解析
-THINK_START_TAG = "<think>"
-THINK_END_TAG = "</think>"
+THINK_START_TAG = "
+  "
+THINK_END_TAG = "
+  "
 
 
 class OllamaError(Exception):
@@ -70,7 +73,8 @@ class OllamaClient:
     特性：
     - 使用aiohttp连接池，支持HTTP/1.1 keep-alive
     - 自动重试3次，指数退避（1s, 2s, 4s）
-    - 支持Qwen3 Thinking模式（解析<think>标签）
+    - 支持Qwen3 Thinking模式（解析
+  标签）
     - 支持SSE流式输出
     - 完整的类型注解和日志记录
 
@@ -173,10 +177,13 @@ class OllamaClient:
 
     def _parse_thinking_content(self, content: str) -> tuple[str, str]:
         """
-        解析Qwen3的<think>标签内容
+        解析Qwen3的
+  标签内容
 
         Qwen3在Thinking模式下会输出：
-            <think>内部思考过程...</think>最终回复内容
+             
+  内部思考过程...
+  最终回复内容
 
         Args:
             content: 原始响应内容

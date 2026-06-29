@@ -142,6 +142,15 @@ check_ollama() {
     else
         log_info "模型 $MODEL 已就绪 ✓"
     fi
+
+    # 预热模型：发送一个轻量级请求，将模型加载到内存
+    # 避免第一次用户请求时加载模型导致的超时
+    log_step "预热模型（首次加载到内存，可能需要 30-60 秒）..."
+    if ! curl -s http://localhost:11434/api/generate -d "{\"model\":\"$MODEL\",\"prompt\":\"你好\",\"stream\":false,\"options\":{\"num_predict\":1}}" > /dev/null 2>&1; then
+        log_warn "模型预热失败，可能内存不足或模型有问题"
+    else
+        log_info "模型预热完成，已加载到内存 ✓"
+    fi
 }
 
 # ========================================================================
@@ -259,7 +268,7 @@ start_backend() {
     export API_PORT="$API_PORT"
     export LOG_LEVEL="INFO"
     export ENABLE_THINKING="true"
-    export LLM_TIMEOUT="60"
+    export LLM_TIMEOUT="120"
     export MAX_FULL_TURNS="10"
     export CORS_ORIGINS="http://localhost:$FE_PORT,http://127.0.0.1:$FE_PORT"
 

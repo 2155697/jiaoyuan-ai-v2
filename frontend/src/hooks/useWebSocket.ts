@@ -17,6 +17,7 @@ const WS_URL = 'ws://localhost:5173/api/chat/ws';
 const RECONNECT_BASE_DELAY = 1000;
 const RECONNECT_MAX_DELAY = 30000;
 const HEARTBEAT_INTERVAL = 30000;
+const MAX_RECONNECT_ATTEMPTS = 5; // 最大重连次数限制
 
 export function useWebSocket(sessionId: string): UseWebSocketReturn {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -193,6 +194,19 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
         console.log('[WebSocket] Disconnected');
         setIsConnected(false);
         clearHeartbeat();
+
+        // 限制重连次数，避免无限重连
+        if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
+          console.error('[WebSocket] Max reconnect attempts reached, giving up');
+          const errorMsg: Message = {
+            id: generateId(),
+            role: 'assistant',
+            content: '⚠️ 连接已断开，请刷新页面重试。',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, errorMsg]);
+          return;
+        }
 
         const delay = Math.min(
           RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptRef.current),
