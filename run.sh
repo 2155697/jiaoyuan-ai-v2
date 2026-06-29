@@ -30,12 +30,45 @@ step "项目目录: ${PROJECT_DIR}"
 > "${BACKEND_LOG}"; > "${FRONTEND_LOG}"
 
 # ---------------------------------------------------------------------------
-# 强制清理残留进程（避免 "Address already in use"）
+# 强制清理残留进程 + 轮询等待端口释放
 # ---------------------------------------------------------------------------
-cleanup_residual() {
-    log "清理残留进程..."
+kill_port_processes() {
+    local port=$1
+    local pids
+    pids=$(lsof -Pi ":${port}" -sTCP:LISTEN -t 2>/dev/null)
+    if [[ -z "${pids}" ]]; then
+        return 0
+    fi
 
-    # 从 PID 文件停止
+    warn "端口 ${port} 被占用，杀死进程: ${pids}"
+    for p in ${pids}; do
+        kill "${p}" 2>/dev/null || true
+    done
+    sleep 1
+    for p in ${pids}; do
+        kill -9 "${p}" 2>/dev/null || true
+    done
+
+    # 轮询等待端口真正释放（最多 10 秒）
+    local retries=0
+    while [[ ${retries} -lt 10 ]]; do
+        if ! lsof -Pi ":${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
+            ok "端口 ${port} 已释放"
+            return 0
+        fi
+        sleep 1
+        ((retries++))
+        echo -n "."
+    done
+    echo ""
+    err "端口 ${port} 仍被占用，无法释放"
+    return 1
+}
+
+cleanup_residual() {
+    step "清理残留进程"
+
+    # 1. 从 PID 文件杀
     for pid_file in "${BACKEND_PID_FILE}" "${LOG_DIR}/frontend.pid"; do
         if [[ -f "${pid_file}" ]]; then
             local old_pid=$(cat "${pid_file}" 2>/dev/null)
@@ -48,17 +81,9 @@ cleanup_residual() {
         fi
     done
 
-    # 兜底：直接杀端口对应的进程
-    for port in 8000 5173; do
-        local pids=$(lsof -Pi ":${port}" -sTCP:LISTEN -t 2>/dev/null)
-        if [[ -n "${pids}" ]]; then
-            warn "端口 ${port} 仍有残留进程，强制清理..."
-            echo "${pids}" | xargs kill -9 2>/dev/null || true
-            sleep 1
-        fi
-    done
-
-    ok "残留进程清理完成"
+    # 2. 按端口杀（覆盖手动启动的进程）+ 轮询等待释放
+    kill_port_processes 8000 || exit 1
+    kill_port_processes 5173 || true  # 前端端口非致命
 }
 
 # ---------------------------------------------------------------------------
@@ -67,13 +92,13 @@ check_port() {
     if lsof -Pi ":${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
         local pid=$(lsof -Pi ":${port}" -sTCP:LISTEN -t 2>/dev/null | head -n1)
         err "端口 ${port} 仍被占用 (PID: ${pid}) — ${service}"
-        err "请手动释放端口: kill -9 ${pid}"
+        err "请手动执行: kill -9 ${pid}"
         exit 1
     fi
 }
 
 # ---------------------------------------------------------------------------
-# 检测 uvicorn —— 输出到 stdout 的只有命令路径，日志走 stderr
+# 检测 uvicorn —— stdout 只输出命令，日志走 stderr
 detect_uvicorn() {
     # 1. PATH 中的 uvicorn
     local uvicorn_path
@@ -99,7 +124,7 @@ detect_uvicorn() {
         fi
     fi
 
-    # 4. 虚拟环境 —— 用 python3 -m uvicorn 更可靠
+    # 4. 虚拟环境
     if [[ -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
         if "${PROJECT_DIR}/.venv/bin/python3" -m uvicorn --version &>/dev/null 2>&1; then
             echo "${PROJECT_DIR}/.venv/bin/python3 -m uvicorn"
@@ -113,14 +138,8 @@ detect_uvicorn() {
         fi
     fi
 
-    # 全部失败
-    err "未找到 uvicorn"
-    echo "" >&2
-    echo -e "  ${YELLOW}请安装:${NC}" >&2
-    echo -e "    python3 -m pip install uvicorn[standard]" >&2
-    echo -e "  或激活虚拟环境:" >&2
-    echo -e "    source .venv/bin/activate && pip install uvicorn[standard]" >&2
-    echo "" >&2
+    err "未找到 uvicorn" >&2
+    echo -e "  ${YELLOW}请安装:${NC}  python3 -m pip install uvicorn[standard]" >&2
     return 1
 }
 
@@ -133,7 +152,7 @@ start_backend() {
     uvicorn_cmd=$(detect_uvicorn) || exit 1
     ok "uvicorn: ${uvicorn_cmd}"
 
-    log "启动: nohup ${uvicorn_cmd} api.main:app"
+    log "nohup ${uvicorn_cmd} api.main:app"
     cd "${PROJECT_DIR}/src"
     nohup ${uvicorn_cmd} api.main:app --host 0.0.0.0 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
 
@@ -172,7 +191,7 @@ start_frontend() {
         ok "node_modules 已存在"
     fi
 
-    log "启动: npm run dev"
+    log "npm run dev"
     nohup npm run dev > "${FRONTEND_LOG}" 2>&1 &
     local pid=$!
     echo "${pid}" > "${LOG_DIR}/frontend.pid"
@@ -195,7 +214,7 @@ start_frontend() {
 open_browser() {
     step "打开浏览器"
     if command -v open &>/dev/null; then
-        sleep 1; open "http://localhost:5173"; ok "浏览器已打开"
+        sleep 1; open "http://localhost:5173"; ok "已打开"
     fi
 }
 
@@ -237,7 +256,7 @@ echo -e "  ${BOLD}教员AI顾问 - 一键启动脚本${NC}"
 echo -e "  ========================================="
 echo ""
 
-# ===== 启动前强制清理残留进程 =====
+# ===== 启动前强制清理 =====
 cleanup_residual
 
 start_backend
