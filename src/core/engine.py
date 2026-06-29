@@ -1,10 +1,12 @@
-"""教员AI顾问 - 主引擎（JiaoyuanEngine）
+"""教员AI顾问 - 主引擎（JiaoyuanEngine）v3.1.0
 
-五层认知架构的统一编排层：
-感知(Perception) → 理解(Understanding) → 推理(Reasoning) → 记忆(Memory) → 表达(Expression)
+优化版本：五层认知架构压缩为 2 次 LLM 调用，大幅提升响应速度。
+- 感知+理解：规则引擎（0ms，无需 LLM）
+- 推理：1 次 LLM 调用（生成矛盾分析+苏格拉底提问）
+- 表达：1 次流式 LLM 调用（生成回复）
 
 作者: AI系统架构师
-版本: 3.0.1
+版本: 3.1.0
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from perception import PerceptionLayer
 from understanding import UnderstandingLayer
@@ -24,6 +26,15 @@ from models import (
     ProblemProfile,
     ReasoningResult,
     EngineConfig,
+    ProblemType,
+    FrameworkType,
+    CognitiveStage,
+    EmotionType,
+    SocraticQuestion,
+    QuestionType,
+    ContradictionAnalysis,
+    PhaseAssessment,
+    PhaseType,
 )
 from llm_client import OllamaClient
 from cognitive_graph import CognitiveGraph
@@ -33,7 +44,7 @@ logger = logging.getLogger("jiaoyuan.engine")
 
 
 class JiaoyuanEngine:
-    """教员AI顾问主引擎 - 五层认知架构编排器"""
+    """教员AI顾问主引擎 - 优化版认知架构编排器"""
 
     def __init__(self, config: Optional[EngineConfig] = None):
         self.config = config or EngineConfig()
@@ -49,7 +60,6 @@ class JiaoyuanEngine:
 
         self.maoxuan_retriever = MaoxuanRetriever()
 
-        # 修复：五层架构正确传入依赖实例
         self.perception = PerceptionLayer(
             llm_client=self.llm_client,
             rule_first=True,
@@ -62,17 +72,16 @@ class JiaoyuanEngine:
         self.reasoning = ReasoningLayer(llm_client=self.llm_client)
         self.expression = ExpressionLayer()
 
-        # 修复：会话管理使用 MemoryLayer（提供完整的 get_context 字典）
         self._sessions: Dict[str, MemoryLayer] = {}
 
         logger.info(
-            "JiaoyuanEngine initialized: model=%s, thinking=%s",
+            "JiaoyuanEngine v3.1.0 initialized: model=%s, thinking=%s",
             self.config.model_name,
             self.config.enable_thinking_mode,
         )
 
     def _get_session(self, session_id: str, user_id: str) -> MemoryLayer:
-        """获取或创建会话记忆（MemoryLayer 提供完整的上下文字典）"""
+        """获取或创建会话记忆"""
         session_key = f"{user_id}:{session_id}"
 
         if session_key not in self._sessions:
@@ -85,36 +94,291 @@ class JiaoyuanEngine:
 
         return self._sessions[session_key]
 
-    def _build_expression_messages(
+    # ========================================================================
+    # 优化：规则引擎快速提取（替代 LLM 调用）
+    # ========================================================================
+    def _rule_perceive(self, user_input: str) -> UserIntent:
+        """规则感知：0ms，无需 LLM"""
+        text = user_input.strip()
+
+        # 情绪规则识别
+        emotion = EmotionType.CONFUSED
+        if any(k in text for k in ["焦虑", "担心", "害怕", "急"]):
+            emotion = EmotionType.ANXIOUS
+        elif any(k in text for k in ["迷茫", "不知道", "不清楚", "困惑"]):
+            emotion = EmotionType.CONFUSED
+        elif any(k in text for k in ["生气", "愤怒", "不公平", "恨"]):
+            emotion = EmotionType.FRUSTRATED
+        elif any(k in text for k in ["想", "希望", "期待", "梦想"]):
+            emotion = EmotionType.HOPEFUL
+        elif any(k in text for k in ["犹豫", "纠结", "选", "怎么办"]):
+            emotion = EmotionType.HESITANT
+        elif any(k in text for k in ["压力", "累", "受不了", "崩溃"]):
+            emotion = EmotionType.OVERWHELMED
+        elif any(k in text for k in ["坚定", "决心", "一定", "必须"]):
+            emotion = EmotionType.DETERMINED
+
+        # 认知阶段规则识别
+        stage = CognitiveStage.PROBLEM_STATEMENT
+        if any(k in text for k in ["怎么办", "如何", "怎么", "选择", "选"]):
+            stage = CognitiveStage.DECISION_STRUGGLE
+        elif any(k in text for k in ["信息", "了解", "搜索", "查", "调查"]):
+            stage = CognitiveStage.INFORMATION_SEEKING
+        elif any(k in text for k in ["方法", "技巧", "学习", "提升", "进步"]):
+            stage = CognitiveStage.OPTION_EXPLORATION
+        elif any(k in text for k in ["决定", "行动", "做", "执行", "开始"]):
+            stage = CognitiveStage.ACTION_CONFIRMATION
+        elif any(k in text for k in ["总结", "回顾", "反思", "经验", "教训"]):
+            stage = CognitiveStage.REFLECTION
+
+        # 提取关键词（简单分词）
+        import re
+        words = re.findall(r'[\u4e00-\u9fff]{2,}', text)
+        keywords = list(set([w for w in words if len(w) >= 2 and len(w) <= 6]))[:8]
+
+        # 提取主题（前10字或第一个实体）
+        topic = text[:10] if len(text) <= 10 else text[:10] + "..."
+
+        return UserIntent(
+            topic=topic,
+            keywords=keywords,
+            entities=[],
+            domain="general",
+            emotion=emotion,
+            emotion_intensity=0.6,
+            emotional_subtext="",
+            underlying_concern="",
+            cognitive_stage=stage,
+            implicit_needs=[],
+            surface_request=text,
+            deep_need="",
+            cognitive_cycle_position={},
+            raw_input=text,
+            input_length=len(text),
+        )
+
+    def _rule_understand(self, user_input: str, user_intent: UserIntent) -> ProblemProfile:
+        """规则理解：0ms，无需 LLM，根据关键词匹配框架"""
+        text = user_input.lower()
+
+        # 问题类型规则匹配
+        problem_type = ProblemType.CONTRADICTION_ANALYSIS
+        if any(k in text for k in ["矛盾", "冲突", "两难", "对立", "斗争"]):
+            problem_type = ProblemType.CONTRADICTION_ANALYSIS
+        elif any(k in text for k in ["调查", "了解", "真实", "情况", "研究", "考察"]):
+            problem_type = ProblemType.INVESTIGATION_RESEARCH
+        elif any(k in text for k in ["阶段", "形势", "趋势", "判断", "评估", "分析"]):
+            problem_type = ProblemType.PHASE_ASSESSMENT
+        elif any(k in text for k in ["策略", "方法", "路线", "方针", "计划", "方案"]):
+            problem_type = ProblemType.STRATEGY_SELECTION
+        elif any(k in text for k in ["信心", "勇气", "害怕", "退缩", "坚持", "放弃"]):
+            problem_type = ProblemType.CONFIDENCE_BUILDING
+        elif any(k in text for k in ["学习", "理论", "方法", "认识", "思想", "思维"]):
+            problem_type = ProblemType.METHODOLOGY_LEARNING
+
+        # 框架规则匹配
+        framework = FrameworkType.CONTRADICTION_THEORY
+        if problem_type == ProblemType.CONTRADICTION_ANALYSIS:
+            framework = FrameworkType.CONTRADICTION_THEORY
+        elif problem_type == ProblemType.INVESTIGATION_RESEARCH:
+            framework = FrameworkType.INVESTIGATION_METHOD
+        elif problem_type == ProblemType.PHASE_ASSESSMENT:
+            framework = FrameworkType.PROTRACTED_WAR
+        elif problem_type == ProblemType.STRATEGY_SELECTION:
+            framework = FrameworkType.MASS_LINE
+        elif problem_type == ProblemType.CONFIDENCE_BUILDING:
+            framework = FrameworkType.INDEPENDENT_THINKING
+        elif problem_type == ProblemType.METHODOLOGY_LEARNING:
+            framework = FrameworkType.FIVE_LAYER_ANALYSIS
+
+        return ProblemProfile(
+            problem_type=problem_type,
+            framework=framework,
+            framework_confidence=0.7,
+            related_methods=[],
+            related_concepts=[],
+            related_cases=[],
+            related_quotes=[],
+            maoxuan_refs=[],
+        )
+
+    # ========================================================================
+    # 优化：单次 LLM 调用完成推理
+    # ========================================================================
+    async def _single_reasoning(
+        self,
+        user_input: str,
+        user_intent: UserIntent,
+        problem_profile: ProblemProfile,
+    ) -> ReasoningResult:
+        """单次 LLM 调用完成全部推理：矛盾分析 + 阶段判断 + 苏格拉底提问"""
+
+        prompt = f"""你是教员思维分析专家。请分析用户问题，输出 JSON 格式的分析结果。
+
+用户输入：{user_input}
+问题主题：{user_intent.topic}
+用户情绪：{user_intent.emotion.value}
+认知阶段：{user_intent.cognitive_stage.value}
+问题类型：{problem_profile.problem_type.value}
+适用框架：{problem_profile.framework.value}
+
+请输出以下 JSON（不要其他内容）：
+{{
+  "key_insights": ["洞察1", "洞察2", "洞察3"],
+  "primary_contradiction": "主要矛盾描述",
+  "aspects": {{"方面A": "描述", "方面B": "描述"}},
+  "current_phase": "strategic_defense|strategic_stalemate|strategic_counteroffensive",
+  "socratic_questions": [
+    {{"question": "提问1", "type": "clarify"}},
+    {{"question": "提问2", "type": "challenge_assumption"}},
+    {{"question": "提问3", "type": "explore_consequence"}},
+    {{"question": "提问4", "type": "find_evidence"}},
+    {{"question": "提问5", "type": "reframe_perspective"}}
+  ]
+}}
+
+要求：
+1. 用教员矛盾分析法找出主要矛盾
+2. 判断当前处于持久战哪个阶段
+3. 苏格拉底提问要层层递进，引导用户自己思考
+4. 总字数控制在 300 字以内"""
+
+        messages = [
+            {"role": "system", "content": "你是教员思维分析专家，用 JSON 输出分析结果。"},
+            {"role": "user", "content": prompt},
+        ]
+
+        try:
+            response = await self.llm_client.chat(messages)
+            content = response.get("content", "")
+
+            # 提取 JSON
+            import json, re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+            else:
+                data = {}
+
+            # 构建 ReasoningResult
+            questions_data = data.get("socratic_questions", [])
+            socratic_questions = []
+            for q in questions_data[:5]:
+                q_type_str = q.get("type", "clarify")
+                q_type = QuestionType.CLARIFY
+                if q_type_str == "challenge_assumption":
+                    q_type = QuestionType.CHALLENGE_ASSUMPTION
+                elif q_type_str == "explore_consequence":
+                    q_type = QuestionType.EXPLORE_CONSEQUENCE
+                elif q_type_str == "find_evidence":
+                    q_type = QuestionType.FIND_EVIDENCE
+                elif q_type_str == "reframe_perspective":
+                    q_type = QuestionType.REFRAME_PERSPECTIVE
+
+                socratic_questions.append(SocraticQuestion(
+                    question=q.get("question", "请详细说说？"),
+                    type=q_type,
+                    purpose="引导用户深入思考",
+                    target_insight="",
+                    priority=1,
+                ))
+
+            phase_str = data.get("current_phase", "strategic_stalemate")
+            phase = PhaseType.STRATEGIC_STALEMATE
+            if phase_str == "strategic_defense":
+                phase = PhaseType.STRATEGIC_DEFENSE
+            elif phase_str == "strategic_counteroffensive":
+                phase = PhaseType.STRATEGIC_COUNTEROFFENSIVE
+
+            return ReasoningResult(
+                reasoning_chain="",
+                key_insights=data.get("key_insights", ["需要进一步分析"]),
+                socratic_questions=socratic_questions,
+                contradiction_analysis=ContradictionAnalysis(
+                    primary_contradiction=data.get("primary_contradiction", "需要进一步分析"),
+                    secondary_contradictions=[],
+                    aspects=data.get("aspects", {}),
+                    transformation_conditions=[],
+                ),
+                phase_assessment=PhaseAssessment(
+                    current_phase=phase,
+                    phase_confidence=0.6,
+                    key_tasks=[],
+                    transition_signals=[],
+                    assessment="",
+                ),
+                five_layer_analysis=None,
+                reasoning_time_ms=0,
+                thinking_content="",
+                model_used=self.config.model_name,
+            )
+
+        except Exception as e:
+            logger.warning("Single reasoning failed: %s, falling back to default", e)
+            # 回退：返回默认结果
+            return ReasoningResult(
+                reasoning_chain="",
+                key_insights=["抓住主要矛盾", "分析形势阶段", "制定斗争策略"],
+                socratic_questions=[
+                    SocraticQuestion(
+                        question="你说的这个问题的核心是什么？能具体说说吗？",
+                        type=QuestionType.CLARIFY,
+                        purpose="澄清问题",
+                        target_insight="",
+                        priority=1,
+                    ),
+                    SocraticQuestion(
+                        question="你为什么觉得这个问题非这样做不可？",
+                        type=QuestionType.CHALLENGE_ASSUMPTION,
+                        purpose="挑战假设",
+                        target_insight="",
+                        priority=1,
+                    ),
+                    SocraticQuestion(
+                        question="如果按你说的去做，最好的结果是什么？最坏的呢？",
+                        type=QuestionType.EXPLORE_CONSEQUENCE,
+                        purpose="探索后果",
+                        target_insight="",
+                        priority=1,
+                    ),
+                ],
+                contradiction_analysis=None,
+                phase_assessment=None,
+                five_layer_analysis=None,
+                reasoning_time_ms=0,
+                thinking_content="",
+                model_used=self.config.model_name,
+            )
+
+    # ========================================================================
+    # 优化：流式生成回复
+    # ========================================================================
+    async def _stream_response(
         self,
         reasoning_result: ReasoningResult,
         user_intent: UserIntent,
         problem_profile: ProblemProfile,
-    ) -> list:
-        """构建表达层的LLM消息列表"""
+    ) -> AsyncGenerator[str, None]:
+        """流式生成教员风格回复"""
+
         questions_text = "\n".join([
             f"{i+1}. [{q.type.value}] {q.question}"
             for i, q in enumerate(reasoning_result.socratic_questions[:5])
         ])
 
-        # 修复：使用 aspects（字典）替代不存在的 both_sides
         contradiction_text = ""
         if reasoning_result.contradiction_analysis:
             ca = reasoning_result.contradiction_analysis
             aspects_str = ""
             if ca.aspects:
                 aspects_str = "\n".join([f"- {k}: {v}" for k, v in ca.aspects.items()])
-            contradiction_text = f"""
-主要矛盾：{ca.primary_contradiction or '未明确'}
-矛盾两面：{aspects_str or '待分析'}
-"""
+            contradiction_text = f"主要矛盾：{ca.primary_contradiction or '未明确'}\n矛盾两面：{aspects_str or '待分析'}"
 
         phase_text = ""
         if reasoning_result.phase_assessment:
             pa = reasoning_result.phase_assessment
             phase_text = f"当前阶段：{pa.current_phase.value}"
 
-        # 修复：Python 3.9 不支持 f-string 内的反斜杠转义，先提取为变量
         key_insights_str = "\n".join([f"- {insight}" for insight in reasoning_result.key_insights[:5]])
 
         context = f"""用户情绪：{user_intent.emotion.value}
@@ -143,154 +407,63 @@ class JiaoyuanEngine:
 6. 总字数300-500字
 """
 
-        return [
+        messages = [
             {"role": "system", "content": "你是教员，用教员的思维方式和语言风格回复。"},
             {"role": "user", "content": context},
         ]
 
-    async def chat(
-        self,
-        user_input: str,
-        session_id: str = "default",
-        user_id: str = "anonymous",
-    ) -> Dict[str, Any]:
-        total_start = time.time()
-        layer_timings: Dict[str, int] = {}
+        async for chunk in self.llm_client.chat_stream(messages):
+            if chunk["type"] == "content":
+                yield chunk["content"]
+            elif chunk["type"] == "done":
+                break
 
-        logger.info("Chat: user=%s, session=%s, input=%s", user_id, session_id, user_input[:50])
-
-        try:
-            memory = self._get_session(session_id, user_id)
-            memory_context = memory.get_context()
-
-            p_start = time.time()
-            user_intent = await self.perception.perceive(
-                user_input, dialogue_history=memory_context.get("history", []),
-            )
-            layer_timings["perception"] = int((time.time() - p_start) * 1000)
-
-            u_start = time.time()
-            problem_profile = await self.understanding.understand(user_intent)
-            layer_timings["understanding"] = int((time.time() - u_start) * 1000)
-
-            r_start = time.time()
-            reasoning_result = await self.reasoning.reason(
-                user_intent, problem_profile, memory_context,
-            )
-            layer_timings["reasoning"] = int((time.time() - r_start) * 1000)
-
-            e_start = time.time()
-            response_text = await self.expression.express(reasoning_result, user_intent)
-            layer_timings["expression"] = int((time.time() - e_start) * 1000)
-
-            m_start = time.time()
-            await memory.add_turn(user_input, response_text, reasoning_result)
-            memory.update_cognitive_tracker(user_intent, reasoning_result)
-            asyncio.create_task(memory.persist())
-            layer_timings["memory"] = int((time.time() - m_start) * 1000)
-
-            total_time = int((time.time() - total_start) * 1000)
-
-            logger.info(
-                "Chat complete: total=%dms (P:%d U:%d R:%d E:%d M:%d)",
-                total_time,
-                layer_timings.get("perception", 0),
-                layer_timings.get("understanding", 0),
-                layer_timings.get("reasoning", 0),
-                layer_timings.get("expression", 0),
-                layer_timings.get("memory", 0),
-            )
-
-            return {
-                "response": response_text,
-                "thinking": reasoning_result.thinking_content,
-                "user_intent": {
-                    "topic": user_intent.topic,
-                    "emotion": user_intent.emotion.value,
-                    "cognitive_stage": user_intent.cognitive_stage.value,
-                    "keywords": user_intent.keywords,
-                },
-                "problem_profile": {
-                    "type": problem_profile.problem_type.value,
-                    "framework": problem_profile.framework.value,
-                },
-                "reasoning_result": {
-                    "key_insights": reasoning_result.key_insights,
-                    "socratic_questions": [
-                        {"q": q.question, "type": q.type.value}
-                        for q in reasoning_result.socratic_questions
-                    ],
-                    "reasoning_time_ms": reasoning_result.reasoning_time_ms,
-                },
-                "processing_time_ms": total_time,
-                "layer_timings": layer_timings,
-            }
-
-        except Exception as e:
-            logger.exception("Chat processing failed: %s", e)
-            return {
-                "response": "同志，这个问题我需要再想想。你能再说详细一点吗？",
-                "thinking": "",
-                "error": str(e),
-                "processing_time_ms": int((time.time() - total_start) * 1000),
-                "layer_timings": layer_timings,
-            }
-
+    # ========================================================================
+    # 优化后的流式聊天接口
+    # ========================================================================
     async def chat_stream(
         self,
         user_input: str,
         session_id: str = "default",
         user_id: str = "anonymous",
     ) -> AsyncGenerator[Dict[str, Any], None]:
+        """优化版流式聊天：2 次 LLM 调用（1次分析 + 1次流式生成）"""
         total_start = time.time()
 
-        logger.info("Chat stream: user=%s, session=%s", user_id, session_id)
+        logger.info("Chat stream: user=%s, session=%s, input=%s", user_id, session_id, user_input[:50])
 
         try:
-            yield {"type": "progress", "step": 1, "total": 5, "label": "感知分析", "detail": "分析用户意图和情绪状态..."}
+            yield {"type": "progress", "step": 1, "total": 3, "label": "感知分析", "detail": "分析用户意图..."}
 
             memory = self._get_session(session_id, user_id)
             memory_context = memory.get_context()
 
-            user_intent = await self.perception.perceive(
-                user_input, dialogue_history=memory_context.get("history", []),
-            )
-            yield {"type": "progress", "step": 1, "total": 5, "label": "感知分析", "detail": f"主题：{user_intent.topic}，情绪：{user_intent.emotion.value}"}
+            # 优化：规则感知（0ms）
+            user_intent = self._rule_perceive(user_input)
+            yield {"type": "progress", "step": 1, "total": 3, "label": "感知分析", "detail": f"主题：{user_intent.topic}，情绪：{user_intent.emotion.value}"}
 
-            yield {"type": "progress", "step": 2, "total": 5, "label": "理解问题", "detail": "匹配教员思维框架..."}
+            yield {"type": "progress", "step": 2, "total": 3, "label": "理解问题", "detail": "匹配思维框架..."}
 
-            problem_profile = await self.understanding.understand(user_intent)
-            yield {"type": "progress", "step": 2, "total": 5, "label": "理解问题", "detail": f"问题类型：{problem_profile.problem_type.value}，适用框架：{problem_profile.framework.value}"}
+            # 优化：规则理解（0ms）
+            problem_profile = self._rule_understand(user_input, user_intent)
+            yield {"type": "progress", "step": 2, "total": 3, "label": "理解问题", "detail": f"框架：{problem_profile.framework.value}"}
 
-            yield {"type": "progress", "step": 3, "total": 5, "label": "深度推理", "detail": "思维链推理+矛盾分析+阶段判断..."}
+            yield {"type": "progress", "step": 3, "total": 3, "label": "深度推理", "detail": "生成分析..."}
 
-            reasoning_result = await self.reasoning.reason(
-                user_intent, problem_profile, memory_context,
-            )
-            yield {"type": "progress", "step": 3, "total": 5, "label": "深度推理", "detail": f"识别{len(reasoning_result.socratic_questions)}个关键问题，矛盾分析完成"}
+            # 优化：单次 LLM 完成推理
+            reasoning_result = await self._single_reasoning(user_input, user_intent, problem_profile)
+            yield {"type": "progress", "step": 3, "total": 3, "label": "深度推理", "detail": f"识别{len(reasoning_result.socratic_questions)}个关键问题"}
 
-            if reasoning_result.thinking_content:
-                thinking_lines = [l.strip() for l in reasoning_result.thinking_content.split('\n') if l.strip()]
-                for line in thinking_lines[:20]:
-                    yield {"type": "thinking_chunk", "content": line}
-
-            yield {"type": "progress", "step": 4, "total": 5, "label": "生成回复", "detail": "教员风格表达中..."}
-
-            expression_messages = self._build_expression_messages(reasoning_result, user_intent, problem_profile)
+            # 优化：流式生成回复（第2次 LLM 调用）
             full_response = ""
-            async for chunk in self.llm_client.chat_stream(expression_messages):
-                if chunk["type"] == "thinking":
-                    yield {"type": "thinking_chunk", "content": chunk["content"]}
-                elif chunk["type"] == "content":
-                    full_response += chunk["content"]
-                    yield {"type": "content", "content": chunk["content"]}
-                elif chunk["type"] == "done":
-                    break
+            async for content in self._stream_response(reasoning_result, user_intent, problem_profile):
+                full_response += content
+                yield {"type": "content", "content": content}
 
-            yield {"type": "progress", "step": 5, "total": 5, "label": "完成", "detail": ""}
+            yield {"type": "progress", "step": 4, "total": 4, "label": "完成", "detail": ""}
 
-            await memory.add_turn(user_input, full_response, reasoning_result)
-            memory.update_cognitive_tracker(user_intent, reasoning_result)
+            # 异步保存记忆（不阻塞）
+            asyncio.create_task(memory.add_turn(user_input, full_response, reasoning_result))
             asyncio.create_task(memory.persist())
 
             total_time = int((time.time() - total_start) * 1000)
@@ -308,6 +481,46 @@ class JiaoyuanEngine:
             yield {
                 "type": "error",
                 "content": str(e),
+            }
+
+    # ========================================================================
+    # 兼容旧版非流式接口
+    # ========================================================================
+    async def chat(
+        self,
+        user_input: str,
+        session_id: str = "default",
+        user_id: str = "anonymous",
+    ) -> Dict[str, Any]:
+        """非流式聊天接口（兼容旧版）"""
+        total_start = time.time()
+        full_response = ""
+
+        try:
+            async for chunk in self.chat_stream(user_input, session_id, user_id):
+                if chunk["type"] == "content":
+                    full_response += chunk["content"]
+                elif chunk["type"] == "error":
+                    return {
+                        "response": "同志，这个问题我需要再想想。",
+                        "thinking": "",
+                        "error": chunk["content"],
+                        "processing_time_ms": int((time.time() - total_start) * 1000),
+                    }
+
+            return {
+                "response": full_response,
+                "thinking": "",
+                "processing_time_ms": int((time.time() - total_start) * 1000),
+            }
+
+        except Exception as e:
+            logger.exception("Chat processing failed: %s", e)
+            return {
+                "response": "同志，这个问题我需要再想想。你能再说详细一点吗？",
+                "thinking": "",
+                "error": str(e),
+                "processing_time_ms": int((time.time() - total_start) * 1000),
             }
 
     async def health_check(self) -> Dict[str, Any]:
