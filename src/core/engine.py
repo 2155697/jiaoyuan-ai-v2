@@ -411,8 +411,8 @@ class JiaoyuanEngine:
             if chunk["type"] == "content":
                 yield chunk["content"]
             elif chunk["type"] == "thinking":
-                # 修复：thinking 内容也作为回复内容输出，避免"问了没出结果"
-                yield chunk["content"]
+                # thinking 为内部推理过程，不混入正式回复
+                pass
             elif chunk["type"] == "done":
                 break
 
