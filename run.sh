@@ -81,9 +81,13 @@ cleanup_residual() {
         fi
     done
 
-    # 2. 按端口杀（覆盖手动启动的进程）+ 轮询等待释放
+    # 2. 按端口杀 + 轮询等待释放
     kill_port_processes 8000 || exit 1
-    kill_port_processes 5173 || true  # 前端端口非致命
+    kill_port_processes 5173 || true
+
+    # 3. 等待 TIME_WAIT 状态过期（macOS 需要）
+    log "等待端口完全释放..."
+    sleep 2
 }
 
 # ---------------------------------------------------------------------------
@@ -100,31 +104,24 @@ check_port() {
 # ---------------------------------------------------------------------------
 # 检测 uvicorn —— stdout 只输出命令，日志走 stderr
 detect_uvicorn() {
-    # 1. PATH 中的 uvicorn
     local uvicorn_path
     uvicorn_path=$(command -v uvicorn 2>/dev/null)
     if [[ -n "${uvicorn_path}" ]]; then
         echo "uvicorn"
         return 0
     fi
-
-    # 2. python3 -m uvicorn
     if command -v python3 &>/dev/null; then
         if python3 -m uvicorn --version &>/dev/null 2>&1; then
             echo "python3 -m uvicorn"
             return 0
         fi
     fi
-
-    # 3. python -m uvicorn
     if command -v python &>/dev/null; then
         if python -m uvicorn --version &>/dev/null 2>&1; then
             echo "python -m uvicorn"
             return 0
         fi
     fi
-
-    # 4. 虚拟环境
     if [[ -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
         if "${PROJECT_DIR}/.venv/bin/python3" -m uvicorn --version &>/dev/null 2>&1; then
             echo "${PROJECT_DIR}/.venv/bin/python3 -m uvicorn"
@@ -137,7 +134,6 @@ detect_uvicorn() {
             return 0
         fi
     fi
-
     err "未找到 uvicorn" >&2
     echo -e "  ${YELLOW}请安装:${NC}  python3 -m pip install uvicorn[standard]" >&2
     return 1
@@ -152,9 +148,10 @@ start_backend() {
     uvicorn_cmd=$(detect_uvicorn) || exit 1
     ok "uvicorn: ${uvicorn_cmd}"
 
+    # 修复：去掉 --reload，避免 macOS 上 fork 导致的 socket 冲突
     log "nohup ${uvicorn_cmd} api.main:app"
     cd "${PROJECT_DIR}/src"
-    nohup ${uvicorn_cmd} api.main:app --host 0.0.0.0 --port 8000 --reload > "${BACKEND_LOG}" 2>&1 &
+    nohup ${uvicorn_cmd} api.main:app --host 0.0.0.0 --port 8000 > "${BACKEND_LOG}" 2>&1 &
 
     local pid=$!
     echo "${pid}" > "${BACKEND_PID_FILE}"
