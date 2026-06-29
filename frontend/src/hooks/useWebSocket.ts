@@ -113,12 +113,13 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
       }
 
       case 'progress': {
-        // 优化：只在步骤变化时更新，避免频繁渲染
+        // 优化：只在步骤或百分比变化时更新，避免频繁渲染
         setProgress(prev => {
-          if (prev && prev.step === chunk.step) return prev;
+          if (prev && prev.step === chunk.step && prev.percent === chunk.percent) return prev;
           return {
             step: chunk.step || 0,
-            total: chunk.total || 4,
+            total: chunk.total || 5,
+            percent: chunk.percent || 0,
             label: chunk.label || '',
             detail: chunk.detail || '',
           };

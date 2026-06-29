@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { Loader2, Bot, CheckCircle2, Brain, Eye, Lightbulb, MessageSquare, Sparkles } from 'lucide-react';
 import type { Message, ProgressState } from '../types';
 import { MessageBubble } from './MessageBubble';
@@ -57,6 +57,52 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
   const currentStep = progress?.step || 0;
   const currentLabel = progress?.label || '';
   const currentDetail = progress?.detail || '';
+  const backendPercent = progress?.percent || 0;
+
+  // 流式生成阶段模拟进度（40% ~ 95%）
+  const [simulatedPercent, setSimulatedPercent] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    // 清除旧的定时器
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // 如果后端进度 >= 100，直接使用
+    if (backendPercent >= 100) {
+      setSimulatedPercent(100);
+      return;
+    }
+
+    // 如果后端进度 <= 40，直接使用后端进度
+    if (backendPercent <= 40) {
+      setSimulatedPercent(backendPercent);
+    }
+
+    // 在流式生成阶段（step 4，后端给40%），模拟增长到95%
+    if (currentStep === 4 && backendPercent >= 40 && backendPercent < 100) {
+      setSimulatedPercent(backendPercent);
+      timerRef.current = setInterval(() => {
+        setSimulatedPercent(prev => {
+          if (prev >= 95) return 95;
+          // 每100ms增长约0.5%，10秒从40%到95%
+          const next = prev + 0.5;
+          return next > 95 ? 95 : next;
+        });
+      }, 100);
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [currentStep, backendPercent]);
+
+  // 显示用的百分比：优先使用模拟进度，但如果后端给更高值则使用后端值
+  const displayPercent = backendPercent >= 100 ? 100 : Math.max(simulatedPercent, backendPercent);
 
   return (
     <div className="flex gap-3 message-appear">
@@ -73,8 +119,24 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
           )}
         </div>
 
-        {/* 5步进度条 */}
+        {/* 5步进度条 + 百分比进度条 */}
         <div className="bg-surface rounded-xl px-4 py-3 shadow-soft border border-border max-w-xl">
+          {/* 百分比进度条 */}
+          {currentStep > 0 && currentStep < 5 && (
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-text-muted">思考进度</span>
+                <span className="text-[11px] font-mono font-semibold text-primary">{displayPercent.toFixed(1)}%</span>
+              </div>
+              <div className="h-2 bg-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${displayPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* 步骤进度条 */}
           <div className="flex items-center gap-1 mb-3">
             {PROGRESS_STEPS.map((step, idx) => {

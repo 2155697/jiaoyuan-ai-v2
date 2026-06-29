@@ -38,6 +38,7 @@ export interface StreamChunk {
   // 进度信息
   step?: number;
   total?: number;
+  percent?: number;
   label?: string;
   detail?: string;
 }
@@ -46,6 +47,7 @@ export interface StreamChunk {
 export interface ProgressState {
   step: number;
   total: number;
+  percent: number;
   label: string;
   detail: string;
 }

@@ -299,6 +299,7 @@ class JiaoyuanEngine:
                     secondary_contradictions=[],
                     aspects=data.get("aspects", {}),
                     transformation_conditions=[],
+                    resolution_direction=data.get("resolution_direction", "需要进一步分析"),
                 ),
                 phase_assessment=PhaseAssessment(
                     current_phase=phase,
@@ -315,7 +316,7 @@ class JiaoyuanEngine:
 
         except Exception as e:
             logger.warning("Single reasoning failed: %s, falling back to default", e)
-            # 回退：返回默认结果
+            # 回退：返回默认结果，避免 None 导致后续处理错误
             return ReasoningResult(
                 reasoning_chain="",
                 key_insights=["抓住主要矛盾", "分析形势阶段", "制定斗争策略"],
@@ -342,8 +343,20 @@ class JiaoyuanEngine:
                         priority=1,
                     ),
                 ],
-                contradiction_analysis=None,
-                phase_assessment=None,
+                contradiction_analysis=ContradictionAnalysis(
+                    primary_contradiction="需要进一步分析",
+                    secondary_contradictions=[],
+                    aspects={},
+                    transformation_conditions=[],
+                    resolution_direction="需要进一步分析",
+                ),
+                phase_assessment=PhaseAssessment(
+                    current_phase=PhaseType.STRATEGIC_STALEMATE,
+                    phase_confidence=0.5,
+                    key_tasks=[],
+                    transition_signals=[],
+                    assessment="",
+                ),
                 five_layer_analysis=None,
                 reasoning_time_ms=0,
                 thinking_content="",
@@ -433,34 +446,35 @@ class JiaoyuanEngine:
         logger.info("Chat stream: user=%s, session=%s, input=%s", user_id, session_id, user_input[:50])
 
         try:
-            yield {"type": "progress", "step": 1, "total": 3, "label": "感知分析", "detail": "分析用户意图..."}
+            yield {"type": "progress", "step": 1, "total": 5, "percent": 5, "label": "感知分析", "detail": "分析用户意图..."}
 
             memory = self._get_session(session_id, user_id)
             memory_context = memory.get_context()
 
             # 优化：规则感知（0ms）
             user_intent = self._rule_perceive(user_input)
-            yield {"type": "progress", "step": 1, "total": 3, "label": "感知分析", "detail": f"主题：{user_intent.topic}，情绪：{user_intent.emotion.value}"}
+            yield {"type": "progress", "step": 1, "total": 5, "percent": 10, "label": "感知分析", "detail": f"主题：{user_intent.topic}，情绪：{user_intent.emotion.value}"}
 
-            yield {"type": "progress", "step": 2, "total": 3, "label": "理解问题", "detail": "匹配思维框架..."}
+            yield {"type": "progress", "step": 2, "total": 5, "percent": 15, "label": "理解问题", "detail": "匹配思维框架..."}
 
             # 优化：规则理解（0ms）
             problem_profile = self._rule_understand(user_input, user_intent)
-            yield {"type": "progress", "step": 2, "total": 3, "label": "理解问题", "detail": f"框架：{problem_profile.framework.value}"}
+            yield {"type": "progress", "step": 2, "total": 5, "percent": 20, "label": "理解问题", "detail": f"框架：{problem_profile.framework.value}"}
 
-            yield {"type": "progress", "step": 3, "total": 3, "label": "深度推理", "detail": "生成分析..."}
+            yield {"type": "progress", "step": 3, "total": 5, "percent": 25, "label": "深度推理", "detail": "生成分析..."}
 
             # 优化：单次 LLM 完成推理
             reasoning_result = await self._single_reasoning(user_input, user_intent, problem_profile)
-            yield {"type": "progress", "step": 3, "total": 3, "label": "深度推理", "detail": f"识别{len(reasoning_result.socratic_questions)}个关键问题"}
+            yield {"type": "progress", "step": 3, "total": 5, "percent": 35, "label": "深度推理", "detail": f"识别{len(reasoning_result.socratic_questions)}个关键问题"}
 
             # 优化：流式生成回复（第2次 LLM 调用）
+            yield {"type": "progress", "step": 4, "total": 5, "percent": 40, "label": "生成回复", "detail": "教员正在思考..."}
             full_response = ""
             async for content in self._stream_response(reasoning_result, user_intent, problem_profile):
                 full_response += content
                 yield {"type": "content", "content": content}
 
-            yield {"type": "progress", "step": 4, "total": 4, "label": "完成", "detail": ""}
+            yield {"type": "progress", "step": 5, "total": 5, "percent": 100, "label": "完成", "detail": ""}
 
             # 异步保存记忆（不阻塞）
             asyncio.create_task(memory.add_turn(user_input, full_response, reasoning_result))
