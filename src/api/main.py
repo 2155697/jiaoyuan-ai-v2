@@ -50,8 +50,14 @@ if _project_dir not in sys.path:
 
 try:
     from dotenv import load_dotenv
-    _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-    load_dotenv(_env_path)
+    # 修复：从 api/main.py 找到项目根目录（main.py -> api -> src -> 项目根目录）
+    _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    _env_path = os.path.join(_project_root, ".env")
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+    else:
+        # 回退：尝试当前工作目录
+        load_dotenv()
 except ImportError:
     pass  # python-dotenv 未安装，依赖系统环境变量
 
