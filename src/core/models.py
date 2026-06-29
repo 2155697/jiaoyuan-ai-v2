@@ -535,7 +535,7 @@ class EngineConfig(BaseModel):
 
     # 超时配置
     llm_timeout_seconds: int = Field(default=120)
-    max_total_response_time: int = Field(default=10)
+    max_total_response_time: int = Field(default=300)  # 5分钟安全上限
 
     # 认知图谱配置
     cognitive_graph_dir: str = Field(default="data/cognitive_graph")
