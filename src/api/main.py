@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -114,45 +115,45 @@ async def lifespan(app: FastAPI):
 
     启动时：
     - 初始化日志系统
-    - 预初始化引擎（可选）
+    - 后台预初始化引擎（不阻塞请求处理）
 
     关闭时：
     - 关闭所有WebSocket连接
     - 释放引擎资源
-    - 清理临时数据
     """
     # ========== 启动 ==========
     logger.info("=" * 60)
     logger.info("教员AI顾问 API 正在启动...")
     logger.info("=" * 60)
 
-    start_time = time.time()
+    # 修复：引擎初始化（加载embedding模型等）需要数秒到数十秒
+    # 如果在 lifespan 中 await，health endpoint 在初始化完成前完全不可用
+    # 改用 asyncio.create_task 后台初始化，endpoint 立刻可用
+    async def _bg_init():
+        try:
+            logger.info("后台预初始化引擎...")
+            start = time.time()
+            await EngineManager.get_engine()
+            elapsed = time.time() - start
+            logger.info("引擎预初始化完成 (%.2fs)", elapsed)
+        except Exception as e:
+            logger.warning("引擎预初始化失败: %s", e)
+            logger.warning("首个请求时将重试初始化")
 
-    # 预初始化引擎（提前加载，避免首个请求等待）
-    try:
-        logger.info("正在预初始化引擎...")
-        await EngineManager.get_engine()
-        elapsed = time.time() - start_time
-        logger.info("引擎预初始化完成 (%.2fs)", elapsed)
-    except Exception as e:
-        logger.warning("引擎预初始化失败: %s", e)
-        logger.warning("将在首个请求时重试初始化")
-
-    logger.info("API服务就绪 - 文档地址: http://localhost:%s/docs", os.environ.get("API_PORT", "8000"))
+    asyncio.create_task(_bg_init())
+    logger.info("API服务就绪 - 文档: http://localhost:%s/docs", os.environ.get("API_PORT", "8000"))
     logger.info("=" * 60)
 
-    yield  # 应用运行期间
+    yield  # 应用运行期间 — endpoint 在此刻立即可用
 
     # ========== 关闭 ==========
     logger.info("教员AI顾问 API 正在关闭...")
 
-    # 关闭所有WebSocket连接
     try:
         await websocket_manager.close_all()
     except Exception as e:
         logger.error("关闭WebSocket连接时出错: %s", e)
 
-    # 关闭引擎
     try:
         await EngineManager.close()
     except Exception as e:
