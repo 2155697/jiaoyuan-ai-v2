@@ -22,26 +22,11 @@ BOLD='\033[1m'
 # ---------------------------------------------------------------------------
 # 日志函数
 # ---------------------------------------------------------------------------
-log() {
-    echo -e "${BLUE}[INFO]${NC}  $1"
-}
-
-ok() {
-    echo -e "${GREEN}[OK]${NC}   $1"
-}
-
-err() {
-    echo -e "${RED}[ERR]${NC}  $1" >&2
-}
-
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-step() {
-    echo -e ""
-    echo -e "${BOLD}${MAGENTA}==>${NC} ${BOLD}$1${NC}"
-}
+log() { echo -e "${BLUE}[INFO]${NC}  $1"; }
+ok() { echo -e "${GREEN}[OK]${NC}   $1"; }
+err() { echo -e "${RED}[ERR]${NC}  $1" >&2; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+step() { echo -e ""; echo -e "${BOLD}${MAGENTA}==>${NC} ${BOLD}$1${NC}"; }
 
 # ---------------------------------------------------------------------------
 # 项目目录检测
@@ -52,7 +37,6 @@ PROJECT_DIR="${SCRIPT_DIR}"
 step "检测项目目录"
 log "项目目录: ${PROJECT_DIR}"
 
-# 检查关键文件/目录是否存在
 if [[ ! -d "${PROJECT_DIR}/src" ]]; then
     err "未找到 src/ 目录，请在项目根目录下执行此脚本"
     exit 1
@@ -105,29 +89,46 @@ start_backend() {
     # 端口冲突检查
     check_port 8000 "FastAPI"
 
-    # 检查 Python/uvicorn 是否可用
-    if ! command -v uvicorn &>/dev/null; then
-        if command -v python3 &>/dev/null; then
-            log "尝试通过 pip 安装 uvicorn..."
-            pip3 install uvicorn[standard] 2>/dev/null || pip install uvicorn[standard]
-        else
-            err "未找到 python3，请先安装 Python 3.14"
-            exit 1
-        fi
+    # 检测 Python 和启动方式
+    local python_cmd=""
+    local uvicorn_cmd=""
+
+    if command -v python3 &>/dev/null; then
+        python_cmd="python3"
+    elif command -v python &>/dev/null; then
+        python_cmd="python"
+    else
+        err "未找到 python3 或 python，请先安装 Python 3.14"
+        exit 1
     fi
 
-    # 检查后端依赖（requirements.txt）
+    # 检测 uvicorn 启动方式（优先 python3 -m uvicorn，更可靠）
+    if ${python_cmd} -m uvicorn --version &>/dev/null 2>&1; then
+        uvicorn_cmd="${python_cmd} -m uvicorn"
+        ok "uvicorn 可用 (${python_cmd} -m uvicorn)"
+    elif command -v uvicorn &>/dev/null; then
+        uvicorn_cmd="uvicorn"
+        ok "uvicorn 可用 (PATH)"
+    else
+        warn "uvicorn 未安装，尝试安装..."
+        ${python_cmd} -m pip install uvicorn[standard] 2>/dev/null || {
+            err "安装 uvicorn 失败，请手动运行: ${python_cmd} -m pip install uvicorn[standard]"
+            exit 1
+        }
+        uvicorn_cmd="${python_cmd} -m uvicorn"
+    fi
+
+    # 检查并安装后端依赖（requirements.txt）
     if [[ -f "${PROJECT_DIR}/src/requirements.txt" ]]; then
-        log "安装后端依赖..."
-        pip3 install -r "${PROJECT_DIR}/src/requirements.txt" -q 2>/dev/null || \
-            pip install -r "${PROJECT_DIR}/src/requirements.txt" -q
+        log "检查后端依赖..."
+        ${python_cmd} -m pip install -r "${PROJECT_DIR}/src/requirements.txt" -q 2>/dev/null || true
     fi
 
     # 使用 nohup 启动后端，确保独立于终端运行
-    log "启动 FastAPI 服务 (nohup uvicorn)..."
+    log "启动 FastAPI 服务 (nohup ${uvicorn_cmd})..."
     cd "${PROJECT_DIR}/src"
 
-    nohup uvicorn api.main:app \
+    nohup ${uvicorn_cmd} api.main:app \
         --host 0.0.0.0 \
         --port 8000 \
         --reload \
@@ -184,7 +185,7 @@ start_frontend() {
     cd "${frontend_dir}"
 
     # node_modules 检查
-    if [[ ! -d "${frontend_dir}/node_modules/.bin/vite" && ! -f "${frontend_dir}/node_modules/.bin/vite" ]]; then
+    if [[ ! -f "${frontend_dir}/node_modules/.bin/vite" ]]; then
         warn "未找到 node_modules，即将执行 npm install..."
         if ! command -v npm &>/dev/null; then
             err "未找到 npm，请先安装 Node.js"
@@ -231,7 +232,6 @@ start_frontend() {
     done
 
     echo ""
-    # 前端可能只是还没完全就绪，但 Vite 通常启动很快，给个警告继续
     warn "前端服务可能尚未完全就绪，请稍等片刻"
     log "前端日志: ${FRONTEND_LOG}"
 }
