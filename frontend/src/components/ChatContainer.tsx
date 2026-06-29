@@ -53,6 +53,32 @@ const PROGRESS_STEPS = [
   { key: 5, label: '完成', icon: MessageSquare, desc: '回复已生成' },
 ];
 
+// 内联动画关键帧
+const stripeAnimationStyles = `
+  @keyframes stripe-move {
+    0% { background-position: 0 0; }
+    100% { background-position: 28px 0; }
+  }
+  @keyframes progress-glow {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.25); }
+  }
+  @keyframes icon-breathe {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.08); opacity: 0.85; }
+  }
+  @keyframes ring-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+    70% { box-shadow: 0 0 0 6px rgba(139, 92, 246, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+  }
+  @keyframes percent-pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+    100% { transform: scale(1); }
+  }
+`;
+
 function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
   const currentStep = progress?.step || 0;
   const currentLabel = progress?.label || '';
@@ -62,6 +88,7 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
   // 流式生成阶段模拟进度（40% ~ 95%）
   const [simulatedPercent, setSimulatedPercent] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [percentPop, setPercentPop] = useState(false);
 
   useEffect(() => {
     // 清除旧的定时器
@@ -101,11 +128,24 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
     };
   }, [currentStep, backendPercent]);
 
+  // 百分比变化时触发动画
+  const roundedPercent = Math.round(displayPercent);
+  useEffect(() => {
+    setPercentPop(true);
+    const timer = setTimeout(() => setPercentPop(false), 200);
+    return () => clearTimeout(timer);
+  }, [roundedPercent]);
+
   // 显示用的百分比：优先使用模拟进度，但如果后端给更高值则使用后端值
   const displayPercent = backendPercent >= 100 ? 100 : Math.max(simulatedPercent, backendPercent);
 
+  const isComplete = displayPercent >= 100;
+
   return (
     <div className="flex gap-3 message-appear">
+      {/* 注入动画关键帧 */}
+      <style dangerouslySetInnerHTML={{ __html: stripeAnimationStyles }} />
+
       <div className="shrink-0 w-8 h-8 rounded-full bg-primary flex items-center justify-center shadow-soft">
         <Bot className="w-4 h-4 text-white" />
       </div>
@@ -120,19 +160,68 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
         </div>
 
         {/* 5步进度条 + 百分比进度条 */}
-        <div className="bg-surface rounded-xl px-4 py-3 shadow-soft border border-border max-w-xl">
+        <div className="bg-surface rounded-xl px-4 py-3 shadow-medium border border-border/80 max-w-xl relative overflow-hidden">
+          {/* 顶部微光装饰线 */}
+          <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+
           {/* 百分比进度条 */}
           {currentStep > 0 && currentStep < 5 && (
             <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-text-muted">思考进度</span>
-                <span className="text-[11px] font-mono font-semibold text-primary">{displayPercent.toFixed(1)}%</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] text-text-muted font-medium tracking-wide">思考进度</span>
+                <span
+                  className={`text-sm font-bold font-mono tabular-nums transition-colors duration-300 ${
+                    isComplete ? 'text-green-500' : 'text-primary'
+                  }`}
+                  style={{
+                    animation: percentPop ? 'percent-pop 0.2s ease-out' : 'none',
+                    textShadow: isComplete ? '0 0 8px rgba(34,197,94,0.3)' : '0 0 6px rgba(139,92,246,0.2)',
+                  }}
+                >
+                  {Math.round(displayPercent)}%
+                </span>
               </div>
-              <div className="h-2 bg-border rounded-full overflow-hidden">
+              <div className="h-2.5 bg-border/70 rounded-full overflow-hidden shadow-inner">
                 <div
-                  className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${displayPercent}%` }}
-                />
+                  className="h-full rounded-full transition-all duration-300 ease-out relative"
+                  style={{
+                    width: `${Math.min(displayPercent, 100)}%`,
+                    background: isComplete
+                      ? 'linear-gradient(90deg, #22c55e, #4ade80)'
+                      : 'linear-gradient(90deg, #8b5cf6, #a78bfa, #c4b5fd)',
+                    backgroundSize: '28px 28px',
+                    animation: isComplete
+                      ? 'progress-glow 1.5s ease-in-out 2'
+                      : 'stripe-move 0.8s linear infinite, progress-glow 2s ease-in-out infinite',
+                    boxShadow: isComplete
+                      ? '0 0 12px rgba(34,197,94,0.4)'
+                      : '0 0 10px rgba(139,92,246,0.35)',
+                  }}
+                >
+                  {/* 条纹叠加层 */}
+                  {!isComplete && (
+                    <div
+                      className="absolute inset-0 rounded-full"
+                      style={{
+                        backgroundImage:
+                          'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,0.18) 6px, rgba(255,255,255,0.18) 12px)',
+                        backgroundSize: '28px 28px',
+                      }}
+                    />
+                  )}
+                  {/* 完成时的闪光效果 */}
+                  {isComplete && (
+                    <div
+                      className="absolute inset-0 rounded-full"
+                      style={{
+                        backgroundImage:
+                          'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(255,255,255,0.12) 6px, rgba(255,255,255,0.12) 12px)',
+                        backgroundSize: '28px 28px',
+                        animation: 'stripe-move 0.8s linear infinite',
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -152,14 +241,24 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
                         isCompleted
                           ? 'bg-green-500 text-white'
                           : isCurrent
-                          ? 'bg-primary text-white shadow-glow animate-pulse'
+                          ? 'bg-primary text-white animate-pulse'
                           : 'bg-border text-text-muted'
                       }`}
+                      style={
+                        isCurrent
+                          ? {
+                              animation: 'ring-pulse 1.8s ease-out infinite',
+                              boxShadow: '0 0 0 0 rgba(139, 92, 246, 0.4)',
+                            }
+                          : isCompleted
+                          ? { boxShadow: '0 0 6px rgba(34,197,94,0.3)' }
+                          : undefined
+                      }
                     >
                       {isCompleted ? (
                         <CheckCircle2 className="w-4 h-4" />
                       ) : isCurrent ? (
-                        <Loader2 className="w-4 h-4 animate-spin-slow" />
+                        <Loader2 className="w-4 h-4 animate-spin-slow" style={{ animation: 'icon-breathe 1.5s ease-in-out infinite, spin 2.5s linear infinite' }} />
                       ) : (
                         <StepIcon className="w-3.5 h-3.5" />
                       )}
@@ -174,8 +273,8 @@ function ThinkingIndicator({ progress }: { progress?: ProgressState | null }) {
                   </div>
                   {idx < PROGRESS_STEPS.length - 1 && (
                     <div
-                      className={`h-0.5 flex-1 mx-1 rounded transition-colors duration-500 ${
-                        isCompleted ? 'bg-green-400' : 'bg-border'
+                      className={`h-0.5 flex-1 mx-1 rounded transition-all duration-500 ${
+                        isCompleted ? 'bg-green-400 shadow-[0_0_4px_rgba(34,197,94,0.3)]' : 'bg-border'
                       }`}
                     />
                   )}
