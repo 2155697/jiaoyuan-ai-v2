@@ -48,40 +48,6 @@ function SocraticQuestionCard({ question, index }: { question: Question; index: 
   );
 }
 
-function ThinkingProgress({ progress, thinkingChunks }: { progress: ProgressState | null; thinkingChunks: string[] }) {
-  if (!progress) return null;
-  const percent = Math.round((progress.step / progress.total) * 100);
-  const steps = ['感知分析', '理解问题', '深度推理', '生成回复', '完成'];
-
-  return (
-    <div className="mb-3 p-3 bg-[#F5E6D3] dark:bg-[#3d2e1f] rounded-lg border border-[#D4A574] dark:border-[#8B7355]">
-      <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs font-medium text-[#8B4513] dark:text-[#D4A574]">{progress.label}</span>
-        <span className="text-xs text-[#8B7355] dark:text-[#A09080]">({progress.step}/{progress.total})</span>
-      </div>
-      <div className="w-full h-2 bg-[#E8DDD0] dark:bg-[#5a4a3a] rounded-full overflow-hidden mb-2">
-        <div className="h-full bg-gradient-to-r from-[#8B4513] to-[#C0392B] rounded-full transition-all duration-500" style={{ width: `${percent}%` }} />
-      </div>
-      <div className="flex gap-1 mb-2">
-        {steps.map((step, i) => (
-          <div key={step} className={`flex-1 h-1 rounded-full transition-colors duration-300 ${i < progress.step ? 'bg-[#8B4513] dark:bg-[#D4A574]' : i === progress.step ? 'bg-[#C0392B] dark:bg-[#E07060]' : 'bg-[#E8DDD0] dark:bg-[#5a4a3a]'}`} />
-        ))}
-      </div>
-      {progress.detail && <p className="text-xs text-[#8B7355] dark:text-[#A09080] italic">{progress.detail}</p>}
-      {thinkingChunks.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-[#D4A574]/30 dark:border-[#8B7355]/30">
-          <p className="text-[10px] font-medium text-[#8B7355] dark:text-[#A09080] mb-1">思考过程：</p>
-          <div className="max-h-32 overflow-y-auto space-y-1">
-            {thinkingChunks.map((chunk, i) => (
-              <p key={i} className="text-[11px] text-[#8B7355] dark:text-[#A09080] leading-relaxed pl-2 border-l-2 border-[#D4A574] dark:border-[#8B7355]">{chunk}</p>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AIMessageBubble({ message, isLatest, progress, thinkingChunks }: { message: Message; isLatest?: boolean; progress?: ProgressState | null; thinkingChunks?: string[] }) {
   const [showThinking, setShowThinking] = useState(false);
   const [displayContent, setDisplayContent] = useState('');
@@ -153,9 +119,6 @@ function AIMessageBubble({ message, isLatest, progress, thinkingChunks }: { mess
           <span className="text-sm font-semibold text-primary">教员</span>
           <span className="text-[11px] text-text-muted flex items-center gap-1"><Clock className="w-3 h-3" />{formatTime(message.timestamp)}</span>
         </div>
-        {isLatest && progress && progress.step < progress.total && (
-          <ThinkingProgress progress={progress} thinkingChunks={thinkingChunks || []} />
-        )}
         {message.thinking && (
           <div className="mb-2">
             <button onClick={() => setShowThinking(!showThinking)} className="flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors py-1">
