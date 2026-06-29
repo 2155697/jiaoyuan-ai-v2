@@ -81,6 +81,88 @@ check_port() {
 }
 
 # ---------------------------------------------------------------------------
+# Python/uvicorn 环境检测
+# ---------------------------------------------------------------------------
+detect_uvicorn() {
+    local uvicorn_cmd=""
+    local python_cmd=""
+    local detection_log=""
+
+    # 1. 找 Python 命令
+    if command -v python3 &>/dev/null; then
+        python_cmd="python3"
+    elif command -v python &>/dev/null; then
+        python_cmd="python"
+    else
+        err "未找到 python3 或 python"
+        echo ""
+        echo -e "  ${YELLOW}请安装 Python 3.12+:${NC}"
+        echo -e "    brew install python3"
+        echo ""
+        return 1
+    fi
+    ok "Python: ${python_cmd} ($(${python_cmd} --version 2>&1))"
+
+    # 2. 检测 python3 -m uvicorn（最可靠）
+    if ${python_cmd} -m uvicorn --version &>/dev/null 2>&1; then
+        uvicorn_cmd="${python_cmd} -m uvicorn"
+        ok "uvicorn: ${uvicorn_cmd} ($(${uvicorn_cmd} --version 2>&1))"
+        echo "${uvicorn_cmd}"
+        return 0
+    fi
+    detection_log="${detection_log}\n  - ${python_cmd} -m uvicorn: 不可用"
+
+    # 3. 检测 uvicorn 命令（PATH 中）
+    if command -v uvicorn &>/dev/null; then
+        uvicorn_cmd="uvicorn"
+        ok "uvicorn: ${uvicorn_cmd} ($(uvicorn --version 2>&1))"
+        echo "${uvicorn_cmd}"
+        return 0
+    fi
+    detection_log="${detection_log}\n  - uvicorn (PATH): 未找到"
+
+    # 4. 检测虚拟环境
+    local venv_paths=("${PROJECT_DIR}/venv/bin/uvicorn" "${PROJECT_DIR}/.venv/bin/uvicorn")
+    for venv_uvicorn in "${venv_paths[@]}"; do
+        if [[ -x "${venv_uvicorn}" ]]; then
+            uvicorn_cmd="${venv_uvicorn}"
+            ok "uvicorn: ${uvicorn_cmd}"
+            echo "${uvicorn_cmd}"
+            return 0
+        fi
+        detection_log="${detection_log}\n  - ${venv_uvicorn}: 未找到"
+    done
+
+    # 5. pip 能否安装？
+    if ${python_cmd} -m pip --version &>/dev/null 2>&1; then
+        warn "uvicorn 未安装，尝试自动安装..."
+        if ${python_cmd} -m pip install uvicorn[standard] 2>/dev/null; then
+            ok "uvicorn 安装成功"
+            uvicorn_cmd="${python_cmd} -m uvicorn"
+            echo "${uvicorn_cmd}"
+            return 0
+        fi
+        detection_log="${detection_log}\n  - ${python_cmd} -m pip install: 失败"
+    else
+        detection_log="${detection_log}\n  - ${python_cmd} -m pip: 不可用"
+    fi
+
+    # 全部失败
+    err "uvicorn 未安装或不在 PATH 中"
+    echo ""
+    echo -e "  ${YELLOW}诊断信息:${NC}${detection_log}"
+    echo ""
+    echo -e "  ${YELLOW}请手动安装 uvicorn:${NC}"
+    echo -e "    ${python_cmd} -m pip install uvicorn[standard]"
+    echo -e "  或者使用虚拟环境:"
+    echo -e "    ${python_cmd} -m venv venv"
+    echo -e "    source venv/bin/activate"
+    echo -e "    pip install uvicorn[standard]"
+    echo ""
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # 后端启动函数
 # ---------------------------------------------------------------------------
 start_backend() {
@@ -89,42 +171,26 @@ start_backend() {
     # 端口冲突检查
     check_port 8000 "FastAPI"
 
-    # 检测 Python 和启动方式
-    local python_cmd=""
-    local uvicorn_cmd=""
-
-    if command -v python3 &>/dev/null; then
-        python_cmd="python3"
-    elif command -v python &>/dev/null; then
-        python_cmd="python"
-    else
-        err "未找到 python3 或 python，请先安装 Python 3.14"
-        exit 1
-    fi
-
-    # 检测 uvicorn 启动方式（优先 python3 -m uvicorn，更可靠）
-    if ${python_cmd} -m uvicorn --version &>/dev/null 2>&1; then
-        uvicorn_cmd="${python_cmd} -m uvicorn"
-        ok "uvicorn 可用 (${python_cmd} -m uvicorn)"
-    elif command -v uvicorn &>/dev/null; then
-        uvicorn_cmd="uvicorn"
-        ok "uvicorn 可用 (PATH)"
-    else
-        warn "uvicorn 未安装，尝试安装..."
-        ${python_cmd} -m pip install uvicorn[standard] 2>/dev/null || {
-            err "安装 uvicorn 失败，请手动运行: ${python_cmd} -m pip install uvicorn[standard]"
-            exit 1
-        }
-        uvicorn_cmd="${python_cmd} -m uvicorn"
-    fi
+    # 检测 uvicorn
+    local uvicorn_cmd
+    uvicorn_cmd=$(detect_uvicorn) || exit 1
 
     # 检查并安装后端依赖（requirements.txt）
-    if [[ -f "${PROJECT_DIR}/src/requirements.txt" ]]; then
-        log "检查后端依赖..."
-        ${python_cmd} -m pip install -r "${PROJECT_DIR}/src/requirements.txt" -q 2>/dev/null || true
+    local pip_cmd
+    if python3 -m pip --version &>/dev/null 2>&1; then
+        pip_cmd="python3 -m pip"
+    elif python -m pip --version &>/dev/null 2>&1; then
+        pip_cmd="python -m pip"
+    else
+        pip_cmd=""
     fi
 
-    # 使用 nohup 启动后端，确保独立于终端运行
+    if [[ -n "${pip_cmd}" && -f "${PROJECT_DIR}/src/requirements.txt" ]]; then
+        log "检查后端依赖..."
+        ${pip_cmd} install -r "${PROJECT_DIR}/src/requirements.txt" -q 2>/dev/null || true
+    fi
+
+    # 使用 nohup 启动后端
     log "启动 FastAPI 服务 (nohup ${uvicorn_cmd})..."
     cd "${PROJECT_DIR}/src"
 
@@ -137,7 +203,7 @@ start_backend() {
     local backend_pid=$!
     echo "${backend_pid}" > "${BACKEND_PID_FILE}"
 
-    log "后端进程 PID: ${backend_pid}，日志: ${BACKEND_LOG}"
+    log "后端进程 PID: ${backend_pid}"
 
     # 健康检查：轮询等待后端就绪
     local retries=0
@@ -148,14 +214,12 @@ start_backend() {
 
     while [[ ${retries} -lt ${max_retries} ]]; do
         if curl -sf "${health_url}" >/dev/null 2>&1; then
-            ok "后端服务已就绪 — ${health_url}"
+            ok "后端服务已就绪"
             return 0
         fi
 
-        # 检查进程是否还在运行
         if ! kill -0 "${backend_pid}" 2>/dev/null; then
-            err "后端进程 (PID: ${backend_pid}) 已退出"
-            err "日志输出:"
+            err "后端进程已退出"
             tail -n 30 "${BACKEND_LOG}" >&2
             exit 1
         fi
@@ -166,8 +230,7 @@ start_backend() {
     done
 
     echo ""
-    err "后端服务健康检查超时 (${max_retries} 秒)"
-    err "请检查日志: ${BACKEND_LOG}"
+    err "后端健康检查超时"
     tail -n 30 "${BACKEND_LOG}" >&2
     exit 1
 }
@@ -178,7 +241,6 @@ start_backend() {
 start_frontend() {
     step "启动前端服务 (Vite)"
 
-    # 端口冲突检查
     check_port 5173 "Vite Dev Server"
 
     local frontend_dir="${PROJECT_DIR}/frontend"
@@ -188,7 +250,7 @@ start_frontend() {
     if [[ ! -f "${frontend_dir}/node_modules/.bin/vite" ]]; then
         warn "未找到 node_modules，即将执行 npm install..."
         if ! command -v npm &>/dev/null; then
-            err "未找到 npm，请先安装 Node.js"
+            err "未找到 npm，请先安装 Node.js: brew install node"
             exit 1
         fi
         npm install
@@ -204,7 +266,7 @@ start_frontend() {
 
     local frontend_pid=$!
     echo "${frontend_pid}" > "${LOG_DIR}/frontend.pid"
-    log "前端进程 PID: ${frontend_pid}，日志: ${FRONTEND_LOG}"
+    log "前端进程 PID: ${frontend_pid}"
 
     # 等待前端就绪
     local retries=0
@@ -214,14 +276,12 @@ start_frontend() {
 
     while [[ ${retries} -lt ${max_retries} ]]; do
         if curl -sf "http://localhost:5173" >/dev/null 2>&1; then
-            ok "前端服务已就绪 — http://localhost:5173"
+            ok "前端服务已就绪"
             return 0
         fi
 
-        # 检查进程是否还在运行
         if ! kill -0 "${frontend_pid}" 2>/dev/null; then
-            err "前端进程 (PID: ${frontend_pid}) 已退出"
-            err "日志输出:"
+            err "前端进程已退出"
             tail -n 30 "${FRONTEND_LOG}" >&2
             exit 1
         fi
@@ -232,8 +292,7 @@ start_frontend() {
     done
 
     echo ""
-    warn "前端服务可能尚未完全就绪，请稍等片刻"
-    log "前端日志: ${FRONTEND_LOG}"
+    warn "前端可能尚未就绪，浏览器会自动打开"
 }
 
 # ---------------------------------------------------------------------------
@@ -249,7 +308,7 @@ open_browser() {
         open "${url}"
         ok "浏览器已启动"
     else
-        warn "未找到 'open' 命令，请手动访问: ${url}"
+        warn "请手动访问: ${url}"
     fi
 }
 
@@ -285,9 +344,9 @@ print_status() {
     echo -e "  ${CYAN}后端:${NC}  http://localhost:8000    PID: ${backend_pid}"
     echo -e "  ${CYAN}前端:${NC}  http://localhost:5173    PID: ${frontend_pid}"
     echo -e "  ${CYAN}日志:${NC}  ${LOG_DIR}/"
-    echo -e ""
-    echo -e "  ${GREEN}🚀 启动完成！浏览器已自动打开${NC}"
-    echo -e ""
+    echo ""
+    echo -e "  ${GREEN}🚀 启动完成！${NC}"
+    echo ""
     echo -e "  ${YELLOW}提示:${NC}"
     echo -e "    - 查看后端日志: ${BOLD}tail -f ${BACKEND_LOG}${NC}"
     echo -e "    - 查看前端日志: ${BOLD}tail -f ${FRONTEND_LOG}${NC}"
@@ -295,7 +354,7 @@ print_status() {
 }
 
 # ---------------------------------------------------------------------------
-# 信号处理：脚本退出时清理
+# 信号处理
 # ---------------------------------------------------------------------------
 trap 'echo ""; warn "脚本中断"; exit 130' SIGINT SIGTERM
 
@@ -313,7 +372,7 @@ echo "    ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚════�
 echo -e "${NC}"
 echo -e "  ${BOLD}教员AI顾问 - 一键启动脚本${NC}"
 echo -e "  ========================================="
-echo -e ""
+echo ""
 
 start_backend
 start_frontend
