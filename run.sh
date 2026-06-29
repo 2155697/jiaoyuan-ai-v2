@@ -30,12 +30,44 @@ step "项目目录: ${PROJECT_DIR}"
 > "${BACKEND_LOG}"; > "${FRONTEND_LOG}"
 
 # ---------------------------------------------------------------------------
+# 强制清理残留进程（避免 "Address already in use"）
+# ---------------------------------------------------------------------------
+cleanup_residual() {
+    log "清理残留进程..."
+
+    # 从 PID 文件停止
+    for pid_file in "${BACKEND_PID_FILE}" "${LOG_DIR}/frontend.pid"; do
+        if [[ -f "${pid_file}" ]]; then
+            local old_pid=$(cat "${pid_file}" 2>/dev/null)
+            if [[ -n "${old_pid}" ]] && kill -0 "${old_pid}" 2>/dev/null; then
+                kill "${old_pid}" 2>/dev/null || true
+                sleep 1
+                kill -9 "${old_pid}" 2>/dev/null || true
+            fi
+            rm -f "${pid_file}"
+        fi
+    done
+
+    # 兜底：直接杀端口对应的进程
+    for port in 8000 5173; do
+        local pids=$(lsof -Pi ":${port}" -sTCP:LISTEN -t 2>/dev/null)
+        if [[ -n "${pids}" ]]; then
+            warn "端口 ${port} 仍有残留进程，强制清理..."
+            echo "${pids}" | xargs kill -9 2>/dev/null || true
+            sleep 1
+        fi
+    done
+
+    ok "残留进程清理完成"
+}
+
+# ---------------------------------------------------------------------------
 check_port() {
     local port=$1 service=$2
     if lsof -Pi ":${port}" -sTCP:LISTEN -t >/dev/null 2>&1; then
         local pid=$(lsof -Pi ":${port}" -sTCP:LISTEN -t 2>/dev/null | head -n1)
-        err "端口 ${port} 被占用 (PID: ${pid}) — ${service}"
-        err "先执行: bash stop.sh"
+        err "端口 ${port} 仍被占用 (PID: ${pid}) — ${service}"
+        err "请手动释放端口: kill -9 ${pid}"
         exit 1
     fi
 }
@@ -67,7 +99,7 @@ detect_uvicorn() {
         fi
     fi
 
-    # 4. 虚拟环境 —— 用 python3 -m uvicorn 更可靠（避免依赖查找问题）
+    # 4. 虚拟环境 —— 用 python3 -m uvicorn 更可靠
     if [[ -x "${PROJECT_DIR}/.venv/bin/python3" ]]; then
         if "${PROJECT_DIR}/.venv/bin/python3" -m uvicorn --version &>/dev/null 2>&1; then
             echo "${PROJECT_DIR}/.venv/bin/python3 -m uvicorn"
@@ -117,12 +149,12 @@ start_backend() {
         fi
         if ! kill -0 "${pid}" 2>/dev/null; then
             err "后端进程已退出"
-            tail -n 30 "${BACKEND_LOG}" >&2
+            tail -n 50 "${BACKEND_LOG}" >&2
             exit 1
         fi
         sleep 1; ((retries++)); echo -n "."
     done
-    err "后端超时"; tail -n 30 "${BACKEND_LOG}" >&2; exit 1
+    err "后端超时"; tail -n 50 "${BACKEND_LOG}" >&2; exit 1
 }
 
 # ---------------------------------------------------------------------------
@@ -204,6 +236,9 @@ echo -e "${NC}"
 echo -e "  ${BOLD}教员AI顾问 - 一键启动脚本${NC}"
 echo -e "  ========================================="
 echo ""
+
+# ===== 启动前强制清理残留进程 =====
+cleanup_residual
 
 start_backend
 start_frontend
