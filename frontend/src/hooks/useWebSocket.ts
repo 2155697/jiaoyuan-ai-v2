@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { Message, StreamChunk, Question, ProgressState } from '../types';
+import type { Message, StreamChunk, ProgressState } from '../types';
 
 interface UseWebSocketReturn {
   messages: Message[];
@@ -30,8 +30,12 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const currentAssistantMsgRef = useRef<Message | null>(null);
   const sessionIdRef = useRef(sessionId);
+
+  // 优化：使用 ref 缓存当前消息，减少 setState 触发
+  const currentMsgRef = useRef<Message | null>(null);
+  const contentBufferRef = useRef('');
+  const pendingUpdateRef = useRef(false);
 
   // Keep sessionId ref in sync
   useEffect(() => {
@@ -61,83 +65,72 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
     }, HEARTBEAT_INTERVAL);
   }, [clearHeartbeat]);
 
+  // 优化：批量更新消息，使用 requestAnimationFrame 节流
+  const flushMessageUpdate = useCallback(() => {
+    pendingUpdateRef.current = false;
+    if (currentMsgRef.current) {
+      const msg = { ...currentMsgRef.current, content: contentBufferRef.current };
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== msg.id);
+        return [...filtered, msg];
+      });
+    }
+  }, []);
+
+  const scheduleUpdate = useCallback(() => {
+    if (!pendingUpdateRef.current) {
+      pendingUpdateRef.current = true;
+      requestAnimationFrame(() => {
+        flushMessageUpdate();
+      });
+    }
+  }, [flushMessageUpdate]);
+
   // Handle incoming stream chunk
   const handleStreamChunk = useCallback((chunk: StreamChunk) => {
     switch (chunk.type) {
       case 'thinking': {
         setIsThinking(true);
-        currentAssistantMsgRef.current = {
+        const newMsg: Message = {
           id: generateId(),
           role: 'assistant',
           content: '',
           thinking: chunk.content,
           timestamp: new Date(),
         };
+        currentMsgRef.current = newMsg;
+        contentBufferRef.current = '';
+        setMessages(prev => [...prev, newMsg]);
         break;
       }
 
       case 'content': {
         setIsThinking(false);
-        if (currentAssistantMsgRef.current) {
-          currentAssistantMsgRef.current = {
-            ...currentAssistantMsgRef.current,
-            content: currentAssistantMsgRef.current.content + chunk.content,
-          };
-          // Update messages list with current streaming message
-          setMessages(prev => {
-            const filtered = prev.filter(
-              m => m.id !== currentAssistantMsgRef.current?.id
-            );
-            return [...filtered, currentAssistantMsgRef.current!];
-          });
-        }
-        break;
-      }
-
-      case 'questions': {
-        if (currentAssistantMsgRef.current && chunk.questions) {
-          currentAssistantMsgRef.current = {
-            ...currentAssistantMsgRef.current,
-            questions: chunk.questions,
-          };
-          setMessages(prev => {
-            const filtered = prev.filter(
-              m => m.id !== currentAssistantMsgRef.current?.id
-            );
-            return [...filtered, currentAssistantMsgRef.current!];
-          });
-        }
-        break;
-      }
-
-      case 'references': {
-        if (currentAssistantMsgRef.current && chunk.references) {
-          currentAssistantMsgRef.current = {
-            ...currentAssistantMsgRef.current,
-            references: chunk.references,
-          };
-          setMessages(prev => {
-            const filtered = prev.filter(
-              m => m.id !== currentAssistantMsgRef.current?.id
-            );
-            return [...filtered, currentAssistantMsgRef.current!];
-          });
-        }
+        contentBufferRef.current += chunk.content;
+        scheduleUpdate();
         break;
       }
 
       case 'progress': {
-        setProgress({
-          step: chunk.step || 0,
-          total: chunk.total || 5,
-          label: chunk.label || '',
-          detail: chunk.detail || '',
+        // 优化：只在步骤变化时更新，避免频繁渲染
+        setProgress(prev => {
+          if (prev && prev.step === chunk.step) return prev;
+          return {
+            step: chunk.step || 0,
+            total: chunk.total || 4,
+            label: chunk.label || '',
+            detail: chunk.detail || '',
+          };
         });
         break;
       }
 
       case 'thinking_chunk': {
-        setThinkingChunks(prev => [...prev, chunk.content]);
+        // 优化：限制 thinkingChunks 长度，避免无限增长
+        setThinkingChunks(prev => {
+          const next = [...prev, chunk.content];
+          return next.length > 50 ? next.slice(-50) : next;
+        });
         break;
       }
 
@@ -145,7 +138,10 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
         setIsThinking(false);
         setProgress(null);
         setThinkingChunks([]);
-        currentAssistantMsgRef.current = null;
+        // 最后一次同步
+        flushMessageUpdate();
+        currentMsgRef.current = null;
+        contentBufferRef.current = '';
         break;
       }
 
@@ -158,16 +154,16 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, errorMsg]);
-        currentAssistantMsgRef.current = null;
+        currentMsgRef.current = null;
+        contentBufferRef.current = '';
         break;
       }
     }
-  }, []);
+  }, [flushMessageUpdate, scheduleUpdate]);
 
   // Connect WebSocket
   const connect = useCallback(() => {
     try {
-      // Clear any existing reconnect timer
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -186,10 +182,7 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-
-          // Handle pong
           if (data.type === 'pong') return;
-
           handleStreamChunk(data as StreamChunk);
         } catch (err) {
           console.error('[WebSocket] Failed to parse message:', err);
@@ -201,13 +194,11 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
         setIsConnected(false);
         clearHeartbeat();
 
-        // Attempt reconnection with exponential backoff
         const delay = Math.min(
           RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttemptRef.current),
           RECONNECT_MAX_DELAY
         );
         reconnectAttemptRef.current += 1;
-
         console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${reconnectAttemptRef.current})`);
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
@@ -241,7 +232,6 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
   const sendMessage = useCallback((content: string) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       console.error('[WebSocket] Not connected');
-      // Add error message
       const errorMsg: Message = {
         id: generateId(),
         role: 'assistant',
@@ -252,12 +242,10 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
       return;
     }
 
-    // 清空之前的状态
     setThinkingChunks([]);
     setProgress(null);
     setError(null);
 
-    // Add user message
     const userMsg: Message = {
       id: generateId(),
       role: 'user',
@@ -266,7 +254,6 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
     };
     setMessages(prev => [...prev, userMsg]);
 
-    // Send to server
     const payload = {
       message: content,
       session_id: sessionIdRef.current,
@@ -280,7 +267,8 @@ export function useWebSocket(sessionId: string): UseWebSocketReturn {
   // Clear all messages
   const clearMessages = useCallback(() => {
     setMessages([]);
-    currentAssistantMsgRef.current = null;
+    currentMsgRef.current = null;
+    contentBufferRef.current = '';
   }, []);
 
   return {
