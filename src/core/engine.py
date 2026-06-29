@@ -89,6 +89,7 @@ class JiaoyuanEngine:
         self,
         reasoning_result: ReasoningResult,
         user_intent: UserIntent,
+        problem_profile: ProblemProfile,
     ) -> list:
         """构建表达层的LLM消息列表"""
         questions_text = "\n".join([
@@ -120,8 +121,8 @@ class JiaoyuanEngine:
 问题主题：{user_intent.topic}
 认知阶段：{user_intent.cognitive_stage.value}
 
-问题类型：{reasoning_result.problem_type.value}
-适用框架：{reasoning_result.framework.value}
+问题类型：{problem_profile.problem_type.value}
+适用框架：{problem_profile.framework.value}
 
 关键洞察：
 {key_insights_str}
@@ -275,7 +276,7 @@ class JiaoyuanEngine:
 
             yield {"type": "progress", "step": 4, "total": 5, "label": "生成回复", "detail": "教员风格表达中..."}
 
-            expression_messages = self._build_expression_messages(reasoning_result, user_intent)
+            expression_messages = self._build_expression_messages(reasoning_result, user_intent, problem_profile)
             full_response = ""
             async for chunk in self.llm_client.chat_stream(expression_messages):
                 if chunk["type"] == "thinking":
