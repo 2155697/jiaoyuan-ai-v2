@@ -21,7 +21,21 @@ log "正在停止教员AI服务..."
 
 # 停止前端
 log "停止前端..."
-pkill -f "vite.*--port 5173" 2>/dev/null || true
+if [ -f "$LOG_DIR/frontend.pid" ]; then
+    PID=$(cat "$LOG_DIR/frontend.pid")
+    if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID" 2>/dev/null || true
+        sleep 1
+        if kill -0 "$PID" 2>/dev/null; then
+            kill -9 "$PID" 2>/dev/null || true
+        fi
+    fi
+    rm -f "$LOG_DIR/frontend.pid"
+fi
+# 兜底：如果PID文件不存在，用pkill
+if [ ! -f "$LOG_DIR/frontend.pid" ]; then
+    pkill -f "vite.*--port 5173" 2>/dev/null || true
+fi
 ok "前端已停止"
 
 # 停止后端
@@ -42,7 +56,7 @@ ok "后端已停止"
 
 # 清理日志
 log "清理日志..."
-rm -f "$LOG_DIR/backend.log" "$LOG_DIR/frontend.log"
+rm -f "$LOG_DIR/backend.log" "$LOG_DIR/frontend.log" "$LOG_DIR/backend.pid" "$LOG_DIR/frontend.pid"
 ok "日志已清理"
 
 echo ""
